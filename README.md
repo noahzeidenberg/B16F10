@@ -125,6 +125,10 @@ accession/
 - All parameters can be customized in `config.py`
 - Extensive logging is implemented for troubleshooting
 
+See these repo's for some of my inspo:
+1. https://github.com/mdanb/aging_rna_seq_metaanalysis
+...(more to come!)
+
 ## Citation
 
 If you use this pipeline, please cite:
