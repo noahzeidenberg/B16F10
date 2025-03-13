@@ -136,4 +136,4 @@ If you use this pipeline, please cite:
 
 ## License
 
-[Add your license information here] 
+I am not using a license, feel free to fork/clone!
