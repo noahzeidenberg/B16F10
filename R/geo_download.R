@@ -3,6 +3,72 @@
 # Load required libraries
 library(GEOquery)
 library(SRAdb)
+library(dotenv)
+
+# Load environment variables from .env file
+load_dot_env()
+
+# Function to get next API key
+get_next_api_key <- function() {
+  # Get all API keys from environment
+  api_keys <- c(
+    Sys.getenv("NCBI_API_KEY_1"),
+    Sys.getenv("NCBI_API_KEY_2")
+  )
+  
+  # Remove any NULL or empty values
+  api_keys <- api_keys[!is.null(api_keys) & api_keys != ""]
+  
+  if (length(api_keys) == 0) {
+    stop("No NCBI API keys found in environment variables. Please check your .env file.")
+  }
+  
+  # Get the current key from environment
+  current_key <- Sys.getenv("ENTREZ_KEY")
+  
+  # If no current key, use the first one
+  if (current_key == "") {
+    return(api_keys[1])
+  }
+  
+  # Find the current key's position
+  current_pos <- which(api_keys == current_key)
+  
+  # If current key not found or it's the last one, return the first key
+  if (length(current_pos) == 0 || current_pos == length(api_keys)) {
+    return(api_keys[1])
+  }
+  
+  # Otherwise, return the next key
+  return(api_keys[current_pos + 1])
+}
+
+# Function to handle rate limiting with exponential backoff and API key rotation
+handle_rate_limit <- function(fn, max_retries = 3, initial_delay = 1) {
+  for (i in 1:max_retries) {
+    tryCatch({
+      return(fn())
+    }, error = function(e) {
+      if (grepl("429", e$message)) {
+        delay <- initial_delay * (2^(i-1))  # Exponential backoff
+        message(paste("Rate limit hit. Waiting", delay, "seconds before retry", i, "of", max_retries))
+        
+        # Rotate to next API key
+        new_key <- get_next_api_key()
+        Sys.setenv(ENTREZ_KEY = new_key)
+        message(paste("Rotating to next API key:", substr(new_key, 1, 8), "..."))
+        
+        Sys.sleep(delay)
+      } else {
+        stop(e)
+      }
+    })
+  }
+  stop("Max retries reached")
+}
+
+# Initialize with first API key
+Sys.setenv(ENTREZ_KEY = get_next_api_key())
 
 # Get command line arguments
 args <- commandArgs(trailingOnly = TRUE)
