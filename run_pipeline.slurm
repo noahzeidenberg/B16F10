@@ -38,10 +38,11 @@ EOF
 
 # Load required modules
 module load python         # SLURM doesn't like specifying versions
-module load r              $ ""
+module load r              # ""
 module load sra-toolkit
 module load star
 module load subread
+module load edirect        # for esearch, efetch, etc.
 
 # Create and activate virtual environment with system packages
 virtualenv --system-site-packages $SLURM_TMPDIR/env
