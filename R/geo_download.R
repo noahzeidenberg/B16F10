@@ -482,9 +482,25 @@ download_geo_data <- function(accession, output_dir) {
       }
     } else if (is_microarray_data(metadata)) {
       message("\nMicroarray data detected. Processing array files...")
-      platform_id <- metadata$platform_id[1]  # Get platform ID from metadata
       
-      # Process each GSM
+      # Save platform information to a separate file
+      platform_info <- list(
+        platform_id = metadata$platform_id[1],
+        manufacturer = platform_data@header$manufacturer,
+        technology = platform_data@header$technology
+      )
+      
+      # Save platform information
+      write.csv(
+        data.frame(
+          platform_id = platform_info$platform_id,
+          manufacturer = platform_info$manufacturer,
+          technology = platform_info$technology
+        ),
+        file = file.path(output_dir, "platform_info.csv")
+      )
+      
+      # Process each GSM (just download files, no processing)
       for (gsm in gsm_accessions) {
         message(paste("\nProcessing", gsm))
         
@@ -496,18 +512,14 @@ download_geo_data <- function(accession, output_dir) {
         gsm_data <- getGEO(gsm)
         saveRDS(gsm_data, file = file.path(gsm_dir, paste0(gsm, ".rds")))
         
-        # Download and process microarray data
-        if (download_microarray_data(gsm_data, gsm_dir)) {
-          # Process the downloaded data
-          cmd <- sprintf("Rscript R/process_methylation.R %s %s %s",
-                        gsm_dir,
-                        file.path(output_dir, "quantification"),
-                        platform_id)
-          system(cmd)
-        } else {
-          message(paste("  Warning: Failed to download microarray data for", gsm))
-        }
+        # Download microarray data (without processing)
+        download_microarray_data(gsm_data, gsm_dir)
       }
+      
+      message("\nDownload complete. Please install the following annotation package before processing:")
+      message(paste("Platform ID:", platform_info$platform_id))
+      message(paste("Manufacturer:", platform_info$manufacturer))
+      message(paste("Technology:", platform_info$technology))
     } else {
       message("\nThis does not appear to be RNA-seq or microarray data. Available metadata:")
       print(metadata[1, ])
