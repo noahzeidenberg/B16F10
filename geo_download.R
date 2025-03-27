@@ -23,6 +23,20 @@ if (length(args) != 2) {
 accession <- args[1]
 output_dir <- args[2]
 
+# Validate GEO accession exists
+validate_geo_accession <- function(accession) {
+  tryCatch({
+    # Try to search for the accession in GEO
+    search_result <- rentrez::entrez_search(db = "gds", term = accession)
+    if (length(search_result$ids) == 0) {
+      stop(paste("GEO accession", accession, "not found"))
+    }
+    return(TRUE)
+  }, error = function(e) {
+    stop(paste("Invalid GEO accession:", e$message))
+  })
+}
+
 # Function to get SRR accessions from an SRX ID
 get_srr_from_srx <- function(srx) {
   tryCatch({
@@ -71,13 +85,20 @@ get_srx_from_gsm <- function(gsm) {
 
 # Main download function
 download_geo_data <- function(accession, output_dir) {
+  # Validate accession first
+  validate_geo_accession(accession)
+  
   tryCatch({
     # Create output directory
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
     
-    # Get GEO data
+    # Get GEO data with explicit getGEO parameters
     message("\nDownloading GEO metadata...")
-    gset <- getGEO(accession, GSEMatrix = TRUE)
+    gset <- getGEO(accession, 
+                   GSEMatrix = TRUE,
+                   getGPL = FALSE,  # Don't get platform info yet
+                   AnnotGPL = FALSE)
+    
     if (is.null(gset) || length(gset) == 0) {
       stop("Failed to retrieve GEO dataset")
     }
@@ -89,6 +110,10 @@ download_geo_data <- function(accession, output_dir) {
     # Get GSM accessions
     gsm_accessions <- metadata$geo_accession
     message(paste("\nFound", length(gsm_accessions), "GSM accessions"))
+    
+    if (length(gsm_accessions) == 0) {
+      stop("No GSM accessions found in the dataset")
+    }
     
     # Create samples directory
     samples_dir <- file.path(output_dir, "samples")
@@ -102,11 +127,17 @@ download_geo_data <- function(accession, output_dir) {
       
       # Get SRX accession
       srx_id <- get_srx_from_gsm(gsm)
-      if (is.null(srx_id)) next
+      if (is.null(srx_id)) {
+        message(paste("  No SRX found for", gsm))
+        next
+      }
       
       # Get SRR accessions
       srr_ids <- get_srr_from_srx(srx_id)
-      if (is.null(srr_ids)) next
+      if (is.null(srr_ids)) {
+        message(paste("  No SRR found for", srx_id))
+        next
+      }
       
       # Download FASTQ files
       fastq_dir <- file.path(gsm_dir, "FASTQ")
