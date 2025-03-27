@@ -313,7 +313,7 @@ download_geo_data <- function(accession, output_dir) {
     platform_info <- list()
     
     # Try getting platform from annotation
-    if (!is.null(gset[[1]]@annotation)) {
+    if (!is.null(gset[[1]]@annotation) && gset[[1]]@annotation != "") {
       platform_info$annotation <- gset[[1]]@annotation
       message("Platform from annotation: ", platform_info$annotation)
     }
@@ -324,12 +324,6 @@ download_geo_data <- function(accession, output_dir) {
       message("Platform from platform_id: ", paste(platform_info$platform_id, collapse=", "))
     }
     
-    # Get platform from GPL reference
-    if (!is.null(gset[[1]]@gpls)) {
-      platform_info$gpl <- names(gset[[1]]@gpls)
-      message("Platform from GPL: ", paste(platform_info$gpl, collapse=", "))
-    }
-    
     # Save platform information
     saveRDS(platform_info, file = file.path(output_dir, paste0(accession, "_platform_info.rds")))
     write.csv(data.frame(
@@ -337,20 +331,29 @@ download_geo_data <- function(accession, output_dir) {
       platform = unlist(platform_info)
     ), file = file.path(output_dir, paste0(accession, "_platform_info.csv")))
     
-    # Get detailed platform information
-    if (length(platform_info$gpl) > 0) {
+    # Get detailed platform information using the first available platform ID
+    platform_id <- NULL
+    if (!is.null(platform_info$platform_id)) {
+      platform_id <- platform_info$platform_id[1]
+    } else if (!is.null(platform_info$annotation)) {
+      platform_id <- platform_info$annotation
+    }
+    
+    if (!is.null(platform_id)) {
       message("\nGetting detailed platform information...")
-      for (gpl in platform_info$gpl) {
-        platform_data <- getGEO(gpl)
-        saveRDS(platform_data, file = file.path(output_dir, paste0(gpl, "_details.rds")))
+      tryCatch({
+        platform_data <- getGEO(platform_id)
+        saveRDS(platform_data, file = file.path(output_dir, paste0(platform_id, "_details.rds")))
         
         # Extract manufacturer and technology info
         manufacturer <- platform_data@header$manufacturer
         technology <- platform_data@header$technology
-        message("Platform ", gpl, ":")
+        message("Platform ", platform_id, ":")
         message("  Manufacturer: ", manufacturer)
         message("  Technology: ", technology)
-      }
+      }, error = function(e) {
+        message(paste("Warning: Failed to get detailed platform information:", e$message))
+      })
     }
     
     # Continue with existing metadata processing...
