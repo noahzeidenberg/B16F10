@@ -1,0 +1,15 @@
+# Environment variables
+.env
+
+# R specific
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+.cursor/
+methods.md 

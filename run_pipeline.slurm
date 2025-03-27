@@ -44,9 +44,8 @@ module load star
 module load subread
 module load edirect        # for esearch, efetch, etc.
 
-# Create and activate virtual environment with system packages
-virtualenv --system-site-packages $SLURM_TMPDIR/env
-source $SLURM_TMPDIR/env/bin/activate
+# Remove the temporary virtualenv creation and replace with existing .venv activation
+source .venv/bin/activate
 
 # Verify Python packages are available
 python -c "import numpy; import pandas; print(f'NumPy version: {numpy.__version__}\nPandas version: {pandas.__version__}')"

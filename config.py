@@ -2,9 +2,11 @@
 
 # Pipeline configuration
 
-# System settings
-THREADS = 8
-MEMORY = "32G"
+# System settings - derived from SLURM configuration
+from b16f10_pipeline import get_available_cpus, get_available_memory
+
+THREADS = get_available_cpus()  # Gets from SLURM_CPUS_PER_TASK or system
+MEMORY = f"{get_available_memory()}G"  # Gets from SLURM_MEM_PER_CPU or defaults to 4G
 
 # Reference genome settings
 GENOME_REF = {
