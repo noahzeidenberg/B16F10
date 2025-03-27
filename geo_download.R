@@ -72,31 +72,69 @@ handle_rate_limit <- function(fn, max_retries = 3, initial_delay = 1) {
   stop("Max retries reached")
 }
 
+# Function to get SRX accessions from a GSM ID
+get_srx_from_gsm <- function(gsm) {
+  tryCatch({
+    message(paste("  Fetching data for", gsm))
+    
+    # Get the GSM data with rate limit handling
+    gsm_data <- handle_rate_limit(function() {
+      getGEO(gsm)
+    })
+    
+    # Extract the 'relation' field
+    relations <- gsm_data@header["relation"][[1]]
+    
+    # Find the SRA link
+    sra_link <- relations[grep("SRA:", relations)]
+    
+    if (length(sra_link) == 0) {
+      message("  No SRA link found")
+      return(NULL)
+    }
+    
+    # Extract the SRA accession number (SRX ID)
+    sra_acc <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+    message(paste("  Found SRA accession:", sra_acc))
+    
+    return(sra_acc)
+  }, error = function(e) {
+    message(paste("Warning: Failed to get SRA info for", gsm, ":", e$message))
+    return(NULL)
+  })
+}
+
 # Function to get SRR accessions from an SRX ID
 get_srr_from_srx <- function(srx) {
   tryCatch({
     message(paste("  Getting SRR accessions for", srx))
     
-    # Use rentrez instead of command line tools
+    # Use rentrez to search for the SRX
     srx_search <- rentrez::entrez_search(db = "sra", term = srx)
     if (length(srx_search$ids) == 0) {
       message("  No SRA records found")
       return(NULL)
     }
     
-    # Get the SRA records
+    # Get the summary for the SRX
     srx_summary <- rentrez::entrez_summary(db = "sra", id = srx_search$ids)
     
-    # Extract run information
-    runs <- srx_summary$runs
-    if (is.null(runs) || length(runs) == 0) {
+    # Get the run info
+    run_info <- rentrez::entrez_link(dbfrom = "sra", db = "sra", id = srx_search$ids)
+    
+    # Get the SRR IDs
+    if (length(run_info$links$sra_sra) == 0) {
       message("  No SRR accessions found")
       return(NULL)
     }
     
-    # Parse the run accessions
-    srr_ids <- unlist(strsplit(runs, ","))
-    srr_ids <- gsub("^.*?acc=([^;]+).*$", "\\1", srr_ids)
+    # Get summaries for all runs
+    run_summaries <- rentrez::entrez_summary(db = "sra", id = run_info$links$sra_sra)
+    
+    # Extract SRR accessions
+    srr_ids <- vapply(run_summaries, function(x) x$runs, character(1))
+    srr_ids <- unique(unlist(strsplit(srr_ids, ";")))
+    srr_ids <- gsub("^.*?acc=([^,]+).*$", "\\1", srr_ids)
     
     message(paste("  Found SRR accessions:", paste(srr_ids, collapse=", ")))
     return(srr_ids)
