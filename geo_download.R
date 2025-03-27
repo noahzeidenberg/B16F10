@@ -80,4 +80,45 @@ download_geo_data <- function(accession, output_dir) {
   }, error = function(e) {
     stop(paste("Failed to download GEO data:", e$message))
   })
+}
+
+# Function to get SRR accessions from an SRX ID
+get_srr_from_srx <- function(srx) {
+  tryCatch({
+    message(paste("  Getting SRR accessions for", srx))
+    
+    # Use rentrez to search and link
+    srx_search <- handle_rate_limit(function() {
+      entrez_search(db = "sra", term = srx)
+    })
+    
+    if (srx_search$count == 0) {
+      message("  No SRA records found")
+      return(NULL)
+    }
+    
+    # Get the linked SRA records
+    sra_links <- handle_rate_limit(function() {
+      entrez_link(dbfrom = "sra", db = "sra", id = srx_search$ids)
+    })
+    
+    if (length(sra_links$links$sra_sra) == 0) {
+      message("  No SRR accessions found")
+      return(NULL)
+    }
+    
+    # Fetch the SRA records
+    sra_summary <- handle_rate_limit(function() {
+      entrez_summary(db = "sra", id = sra_links$links$sra_sra)
+    })
+    
+    # Extract SRR accessions
+    srr_ids <- vapply(sra_summary, function(x) x$runs$run_acc, character(1))
+    
+    message(paste("  Found SRR accessions:", paste(srr_ids, collapse=", ")))
+    return(srr_ids)
+  }, error = function(e) {
+    message(paste("Warning: Failed to get SRR info for", srx, ":", e$message))
+    return(NULL)
+  })
 } 
