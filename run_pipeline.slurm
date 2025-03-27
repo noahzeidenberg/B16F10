@@ -51,15 +51,19 @@ source .venv/bin/activate
 python -c "import numpy; import pandas; print(f'NumPy version: {numpy.__version__}\nPandas version: {pandas.__version__}')"
 
 # Run the pipeline with parallel processing
-# Using 8 parallel processes as specified in the SLURM configuration
-python b16f10_pipeline.py --all --parallel $SLURM_CPUS_PER_TASK
+if ! python b16f10_pipeline.py --all --parallel $SLURM_CPUS_PER_TASK; then
+    # If the pipeline failed with an error (non-zero exit code)
+    echo "Pipeline failed with an error. Check logs for details."
+    exit 1
+fi
 
-# Check if all accessions are processed
-if ! check_completion; then
-    echo "Pipeline did not complete all accessions. Resubmitting job..."
-    # Resubmit the job
-    sbatch $0
-    exit 0
+# Only check completion and resubmit if we hit the time limit
+if [[ $SLURM_JOB_STATE == "TIMEOUT" ]]; then
+    if ! check_completion; then
+        echo "Job timed out and some accessions are incomplete. Resubmitting..."
+        sbatch $0
+        exit 0
+    fi
 fi
 
 echo "Pipeline completed successfully for all accessions"
