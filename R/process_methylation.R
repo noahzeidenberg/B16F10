@@ -2,8 +2,8 @@
 
 # Load required libraries
 library(minfi)
-library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
-library(IlluminaHumanMethylation450kmanifest)
+library(IlluminaMouseMethylation285kanno.mm10)
+library(IlluminaMouseMethylation285kmanifest)
 
 # Get command line arguments
 args <- commandArgs(trailingOnly = TRUE)
