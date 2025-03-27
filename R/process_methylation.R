@@ -8,35 +8,13 @@ library(DESeq2)    # For RNA-seq data
 
 # Get command line arguments
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 2) {
-  stop("Usage: Rscript process_methylation.R <input_dir> <output_dir>")
+if (length(args) != 3) {
+  stop("Usage: Rscript process_methylation.R <input_dir> <output_dir> <platform_id>")
 }
 
 input_dir <- args[1]
 output_dir <- args[2]
-
-# Function to determine platform type
-get_platform_type <- function(platform_id) {
-  platform_info <- getGEO(platform_id)
-  
-  # Check platform technology
-  tech <- platform_info@header$technology
-  manufacturer <- platform_info@header$manufacturer
-  
-  message("Platform: ", platform_id)
-  message("Technology: ", tech)
-  message("Manufacturer: ", manufacturer)
-  
-  if (grepl("high-throughput sequencing", tolower(tech))) {
-    return("RNA-seq")
-  } else if (grepl("affymetrix", tolower(manufacturer))) {
-    return("affymetrix")
-  } else if (grepl("illumina", tolower(manufacturer))) {
-    return("illumina")
-  } else {
-    return("unknown")
-  }
-}
+platform_id <- args[3]
 
 # Process expression data
 process_expression <- function(input_dir, output_dir, platform_id) {
@@ -44,11 +22,19 @@ process_expression <- function(input_dir, output_dir, platform_id) {
     # Create output directory
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
     
-    # Determine platform type
-    platform_type <- get_platform_type(platform_id)
-    message("Detected platform type: ", platform_type)
+    # Get platform information
+    platform_info <- getGEO(platform_id)
+    message("Processing data for platform: ", platform_id)
     
-    if (platform_type == "affymetrix") {
+    # Determine data type based on platform information
+    tech <- platform_info@header$technology
+    manufacturer <- platform_info@header$manufacturer
+    
+    message("Technology: ", tech)
+    message("Manufacturer: ", manufacturer)
+    
+    # Process based on platform type
+    if (grepl("affymetrix", tolower(manufacturer))) {
       # Process Affymetrix array data
       cel_files <- list.files(input_dir, pattern = "\\.cel$|\\.CEL$|\\.cel.gz$|\\.CEL.gz$", 
                             full.names = TRUE, recursive = TRUE)
@@ -60,8 +46,7 @@ process_expression <- function(input_dir, output_dir, platform_id) {
       } else {
         stop("No CEL files found")
       }
-      
-    } else if (platform_type == "illumina") {
+    } else if (grepl("illumina", tolower(manufacturer))) {
       # Process Illumina array data
       idat_files <- list.files(input_dir, pattern = "\\.idat$|\\.idat.gz$", 
                              full.names = TRUE, recursive = TRUE)
@@ -72,8 +57,7 @@ process_expression <- function(input_dir, output_dir, platform_id) {
       } else {
         stop("No IDAT files found")
       }
-      
-    } else if (platform_type == "RNA-seq") {
+    } else if (grepl("high-throughput sequencing", tolower(tech))) {
       # Process RNA-seq data
       count_files <- list.files(input_dir, pattern = "counts\\.txt$", 
                               full.names = TRUE, recursive = TRUE)
@@ -89,7 +73,7 @@ process_expression <- function(input_dir, output_dir, platform_id) {
         stop("No count files found")
       }
     } else {
-      stop("Unsupported platform type: ", platform_type)
+      stop("Unsupported platform type: ", platform_id)
     }
     
     # Save results

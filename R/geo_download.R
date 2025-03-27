@@ -434,7 +434,8 @@ download_geo_data <- function(accession, output_dir) {
         }
       }
     } else if (is_microarray_data(metadata)) {
-      message("\nMicroarray data detected. Downloading array files...")
+      message("\nMicroarray data detected. Processing array files...")
+      platform_id <- metadata$platform_id[1]  # Get platform ID from metadata
       
       # Process each GSM
       for (gsm in gsm_accessions) {
@@ -448,8 +449,15 @@ download_geo_data <- function(accession, output_dir) {
         gsm_data <- getGEO(gsm)
         saveRDS(gsm_data, file = file.path(gsm_dir, paste0(gsm, ".rds")))
         
-        # Download microarray data
-        if (!download_microarray_data(gsm_data, gsm_dir)) {
+        # Download and process microarray data
+        if (download_microarray_data(gsm_data, gsm_dir)) {
+          # Process the downloaded data
+          cmd <- sprintf("Rscript R/process_methylation.R %s %s %s",
+                        gsm_dir,
+                        file.path(output_dir, "quantification"),
+                        platform_id)
+          system(cmd)
+        } else {
           message(paste("  Warning: Failed to download microarray data for", gsm))
         }
       }
