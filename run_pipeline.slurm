@@ -9,61 +9,58 @@
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 
-# Function to check if all accessions are processed
-check_completion() {
-    python - <<EOF
-import json
-from pathlib import Path
-import pandas as pd
+# Create logs directory if it doesn't exist
+mkdir -p logs
 
-metadata = pd.read_csv("${PATHS['metadata']}")
-accessions = metadata['Accession'].unique()
-all_completed = True
-
-for acc in accessions:
-    checkpoint_file = Path(f"checkpoints/{acc}_status.json")
-    if not checkpoint_file.exists():
-        print(f"Checkpoint file not found for {acc}")
-        all_completed = False
-        continue
-    with open(checkpoint_file) as f:
-        status = json.load(f)
-        if not status.get("completed", False):
-            print(f"Processing incomplete for {acc}")
-            all_completed = False
-
-exit(0 if all_completed else 1)
-EOF
-}
-
-# Load required modules
-module load python         # SLURM doesn't like specifying versions
-module load r              # ""
-module load sra-toolkit
+# Load modules in correct order
+module purge  # Clear any previously loaded modules
+module load StdEnv/2020
+module load python
+module load r
 module load star
 module load subread
-module load edirect        # for esearch, efetch, etc.
 
-# Remove the temporary virtualenv creation and replace with existing .venv activation
+# Load StdEnv/2023 modules separately
+module load StdEnv/2023
+module load sra-toolkit
+module load edirect
+
+# Activate virtual environment and verify R packages
 source .venv/bin/activate
 
+# Verify R packages are available
+Rscript -e "if (!require('GEOquery')) install.packages('GEOquery', repos='https://cloud.r-project.org/')"
+Rscript -e "if (!require('SRAdb')) install.packages('SRAdb', repos='https://cloud.r-project.org/')"
+
 # Verify Python packages are available
-python -c "import numpy; import pandas; print(f'NumPy version: {numpy.__version__}\nPandas version: {pandas.__version__}')"
+python -c "
+import sys
+required_packages = ['numpy', 'pandas', 'scipy']
+missing_packages = []
+for package in required_packages:
+    try:
+        __import__(package)
+    except ImportError:
+        missing_packages.append(package)
+if missing_packages:
+    print(f'Missing packages: {missing_packages}')
+    sys.exit(1)
+print('All required Python packages are available')
+"
 
 # Run the pipeline with parallel processing
 if ! python b16f10_pipeline.py --all --parallel $SLURM_CPUS_PER_TASK; then
-    # If the pipeline failed with an error (non-zero exit code)
     echo "Pipeline failed with an error. Check logs for details."
     exit 1
 fi
 
-# Only check completion and resubmit if we hit the time limit
-if [[ $SLURM_JOB_STATE == "TIMEOUT" ]]; then
-    if ! check_completion; then
+# Check job state and completion
+if [ "$SLURM_JOB_STATE" = "TIMEOUT" ]; then
+    echo "Job timed out. Checking completion status..."
+    if ! python check_completion.py; then
         echo "Job timed out and some accessions are incomplete. Resubmitting..."
         sbatch $0
-        exit 0
     fi
+else
+    echo "Job completed or failed. Check logs for details."
 fi
-
-echo "Pipeline completed successfully for all accessions"
