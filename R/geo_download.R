@@ -309,7 +309,51 @@ download_geo_data <- function(accession, output_dir) {
       getGEO(accession, GSEMatrix = TRUE)
     })
     
-    saveRDS(gset, file = file.path(output_dir, paste0(accession, "_geo_object.rds")))
+    # Get platform information in multiple ways
+    platform_info <- list()
+    
+    # Try getting platform from annotation
+    if (!is.null(gset[[1]]@annotation)) {
+      platform_info$annotation <- gset[[1]]@annotation
+      message("Platform from annotation: ", platform_info$annotation)
+    }
+    
+    # Try getting platform from platform_id
+    if (!is.null(gset[[1]]$platform_id)) {
+      platform_info$platform_id <- unique(gset[[1]]$platform_id)
+      message("Platform from platform_id: ", paste(platform_info$platform_id, collapse=", "))
+    }
+    
+    # Get platform from GPL reference
+    if (!is.null(gset[[1]]@gpls)) {
+      platform_info$gpl <- names(gset[[1]]@gpls)
+      message("Platform from GPL: ", paste(platform_info$gpl, collapse=", "))
+    }
+    
+    # Save platform information
+    saveRDS(platform_info, file = file.path(output_dir, paste0(accession, "_platform_info.rds")))
+    write.csv(data.frame(
+      source = names(platform_info),
+      platform = unlist(platform_info)
+    ), file = file.path(output_dir, paste0(accession, "_platform_info.csv")))
+    
+    # Get detailed platform information
+    if (length(platform_info$gpl) > 0) {
+      message("\nGetting detailed platform information...")
+      for (gpl in platform_info$gpl) {
+        platform_data <- getGEO(gpl)
+        saveRDS(platform_data, file = file.path(output_dir, paste0(gpl, "_details.rds")))
+        
+        # Extract manufacturer and technology info
+        manufacturer <- platform_data@header$manufacturer
+        technology <- platform_data@header$technology
+        message("Platform ", gpl, ":")
+        message("  Manufacturer: ", manufacturer)
+        message("  Technology: ", technology)
+      }
+    }
+    
+    # Continue with existing metadata processing...
     metadata <- pData(gset[[1]])
     write.csv(metadata, file = file.path(output_dir, paste0(accession, "_metadata.csv")))
     
