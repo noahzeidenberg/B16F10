@@ -12,7 +12,7 @@ for (pkg in required_packages) {
 }
 
 # Read the PMID dataframe
-pmid_df <- read.csv("PMID_df.csv")
+pmid_df <- read.csv("PMID_df_test.csv")
 
 # Function to check if a GSE is RNA-seq
 is_rnaseq <- function(gse_id) {
