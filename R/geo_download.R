@@ -3,6 +3,72 @@
 # Load required libraries
 library(GEOquery)
 library(SRAdb)
+library(dotenv)
+
+# Load environment variables from .env file
+load_dot_env()
+
+# Function to get next API key
+get_next_api_key <- function() {
+  # Get all API keys from environment
+  api_keys <- c(
+    Sys.getenv("NCBI_API_KEY_1"),
+    Sys.getenv("NCBI_API_KEY_2")
+  )
+  
+  # Remove any NULL or empty values
+  api_keys <- api_keys[!is.null(api_keys) & api_keys != ""]
+  
+  if (length(api_keys) == 0) {
+    stop("No NCBI API keys found in environment variables. Please check your .env file.")
+  }
+  
+  # Get the current key from environment
+  current_key <- Sys.getenv("ENTREZ_KEY")
+  
+  # If no current key, use the first one
+  if (current_key == "") {
+    return(api_keys[1])
+  }
+  
+  # Find the current key's position
+  current_pos <- which(api_keys == current_key)
+  
+  # If current key not found or it's the last one, return the first key
+  if (length(current_pos) == 0 || current_pos == length(api_keys)) {
+    return(api_keys[1])
+  }
+  
+  # Otherwise, return the next key
+  return(api_keys[current_pos + 1])
+}
+
+# Function to handle rate limiting with exponential backoff and API key rotation
+handle_rate_limit <- function(fn, max_retries = 3, initial_delay = 1) {
+  for (i in 1:max_retries) {
+    tryCatch({
+      return(fn())
+    }, error = function(e) {
+      if (grepl("429", e$message)) {
+        delay <- initial_delay * (2^(i-1))  # Exponential backoff
+        message(paste("Rate limit hit. Waiting", delay, "seconds before retry", i, "of", max_retries))
+        
+        # Rotate to next API key
+        new_key <- get_next_api_key()
+        Sys.setenv(ENTREZ_KEY = new_key)
+        message(paste("Rotating to next API key:", substr(new_key, 1, 8), "..."))
+        
+        Sys.sleep(delay)
+      } else {
+        stop(e)
+      }
+    })
+  }
+  stop("Max retries reached")
+}
+
+# Initialize with first API key
+Sys.setenv(ENTREZ_KEY = get_next_api_key())
 
 # Get command line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -17,17 +83,19 @@ output_dir <- args[2]
 get_srr_from_srx <- function(srx) {
   tryCatch({
     message(paste("  Getting SRR accessions for", srx))
-    # Use esearch and efetch to get SRR accessions from SRX
-    cmd <- paste("esearch -db sra -query", srx, "| efetch -format runinfo | cut -d',' -f1")
+    
+    # Use esearch and elink with API key
+    cmd <- paste("esearch -api_key $ENTREZ_KEY -db sra -query", srx, 
+                "| elink -api_key $ENTREZ_KEY -target sra", 
+                "| efetch -api_key $ENTREZ_KEY -format docsum", 
+                "| xtract -pattern DocumentSummary -element Run@acc")
+    
     message(paste("  Running command:", cmd))
     
-    # Execute the command and capture output
-    srr_ids <- system(cmd, intern = TRUE)
-    
-    # Remove header row if present
-    if (length(srr_ids) > 0 && srr_ids[1] == "Run") {
-      srr_ids <- srr_ids[-1]
-    }
+    # Execute the command with rate limit handling
+    srr_ids <- handle_rate_limit(function() {
+      system(cmd, intern = TRUE)
+    })
     
     if (length(srr_ids) == 0) {
       message("  No SRR accessions found")
@@ -46,8 +114,11 @@ get_srr_from_srx <- function(srx) {
 get_srx_from_gsm <- function(gsm) {
   tryCatch({
     message(paste("  Fetching data for", gsm))
-    # Get the GSM data
-    gsm_data <- getGEO(gsm)
+    
+    # Get the GSM data with rate limit handling
+    gsm_data <- handle_rate_limit(function() {
+      getGEO(gsm)
+    })
     
     # Extract the 'relation' field
     relations <- gsm_data@header["relation"][[1]]
@@ -232,10 +303,60 @@ download_microarray_data <- function(gsm_data, gsm_dir) {
 # Download GEO data
 download_geo_data <- function(accession, output_dir) {
   tryCatch({
-    # Get GEO data
+    # Get GEO data with rate limit handling
     message("\nDownloading GEO metadata...")
-    gset <- getGEO(accession, GSEMatrix = TRUE)
-    saveRDS(gset, file = file.path(output_dir, paste0(accession, "_geo_object.rds")))
+    gset <- handle_rate_limit(function() {
+      getGEO(accession, GSEMatrix = TRUE)
+    })
+    
+    # Get platform information in multiple ways
+    platform_info <- list()
+    
+    # Try getting platform from annotation
+    if (!is.null(gset[[1]]@annotation) && gset[[1]]@annotation != "") {
+      platform_info$annotation <- gset[[1]]@annotation
+      message("Platform from annotation: ", platform_info$annotation)
+    }
+    
+    # Try getting platform from platform_id
+    if (!is.null(gset[[1]]$platform_id)) {
+      platform_info$platform_id <- unique(gset[[1]]$platform_id)
+      message("Platform from platform_id: ", paste(platform_info$platform_id, collapse=", "))
+    }
+    
+    # Save platform information
+    saveRDS(platform_info, file = file.path(output_dir, paste0(accession, "_platform_info.rds")))
+    write.csv(data.frame(
+      source = names(platform_info),
+      platform = unlist(platform_info)
+    ), file = file.path(output_dir, paste0(accession, "_platform_info.csv")))
+    
+    # Get detailed platform information using the first available platform ID
+    platform_id <- NULL
+    if (!is.null(platform_info$platform_id)) {
+      platform_id <- platform_info$platform_id[1]
+    } else if (!is.null(platform_info$annotation)) {
+      platform_id <- platform_info$annotation
+    }
+    
+    if (!is.null(platform_id)) {
+      message("\nGetting detailed platform information...")
+      tryCatch({
+        platform_data <- getGEO(platform_id)
+        saveRDS(platform_data, file = file.path(output_dir, paste0(platform_id, "_details.rds")))
+        
+        # Extract manufacturer and technology info
+        manufacturer <- platform_data@header$manufacturer
+        technology <- platform_data@header$technology
+        message("Platform ", platform_id, ":")
+        message("  Manufacturer: ", manufacturer)
+        message("  Technology: ", technology)
+      }, error = function(e) {
+        message(paste("Warning: Failed to get detailed platform information:", e$message))
+      })
+    }
+    
+    # Continue with existing metadata processing...
     metadata <- pData(gset[[1]])
     write.csv(metadata, file = file.path(output_dir, paste0(accession, "_metadata.csv")))
     
@@ -265,7 +386,7 @@ download_geo_data <- function(accession, output_dir) {
     if (is_sequencing_data(metadata)) {
       message("\nRNA-seq data detected. Fetching SRA information...")
       
-      # Get SRX accessions for each GSM
+      # Get SRX accessions for each GSM with rate limiting
       srx_info <- c()
       for (gsm in gsm_accessions) {
         message(paste("\nProcessing", gsm))
@@ -274,15 +395,20 @@ download_geo_data <- function(accession, output_dir) {
         gsm_dir <- file.path(samples_dir, gsm)
         dir.create(gsm_dir, recursive = TRUE, showWarnings = FALSE)
         
-        # Get GSM data and save RDS
-        gsm_data <- getGEO(gsm)
+        # Get GSM data and save RDS with rate limiting
+        gsm_data <- handle_rate_limit(function() {
+          getGEO(gsm)
+        })
         saveRDS(gsm_data, file = file.path(gsm_dir, paste0(gsm, ".rds")))
         
-        # Get SRX accession
+        # Get SRX accession with rate limiting
         srx_id <- get_srx_from_gsm(gsm)
         if (!is.null(srx_id)) {
           srx_info <- c(srx_info, srx_id)
         }
+        
+        # Add a small delay between GSM requests
+        Sys.sleep(0.5)
       }
       
       srx_info <- unique(srx_info)
@@ -355,9 +481,26 @@ download_geo_data <- function(accession, output_dir) {
         }
       }
     } else if (is_microarray_data(metadata)) {
-      message("\nMicroarray data detected. Downloading array files...")
+      message("\nMicroarray data detected. Processing array files...")
       
-      # Process each GSM
+      # Save platform information to a separate file
+      platform_info <- list(
+        platform_id = metadata$platform_id[1],
+        manufacturer = platform_data@header$manufacturer,
+        technology = platform_data@header$technology
+      )
+      
+      # Save platform information
+      write.csv(
+        data.frame(
+          platform_id = platform_info$platform_id,
+          manufacturer = platform_info$manufacturer,
+          technology = platform_info$technology
+        ),
+        file = file.path(output_dir, "platform_info.csv")
+      )
+      
+      # Process each GSM (just download files, no processing)
       for (gsm in gsm_accessions) {
         message(paste("\nProcessing", gsm))
         
@@ -369,11 +512,14 @@ download_geo_data <- function(accession, output_dir) {
         gsm_data <- getGEO(gsm)
         saveRDS(gsm_data, file = file.path(gsm_dir, paste0(gsm, ".rds")))
         
-        # Download microarray data
-        if (!download_microarray_data(gsm_data, gsm_dir)) {
-          message(paste("  Warning: Failed to download microarray data for", gsm))
-        }
+        # Download microarray data (without processing)
+        download_microarray_data(gsm_data, gsm_dir)
       }
+      
+      message("\nDownload complete. Please install the following annotation package before processing:")
+      message(paste("Platform ID:", platform_info$platform_id))
+      message(paste("Manufacturer:", platform_info$manufacturer))
+      message(paste("Technology:", platform_info$technology))
     } else {
       message("\nThis does not appear to be RNA-seq or microarray data. Available metadata:")
       print(metadata[1, ])
@@ -386,4 +532,4 @@ download_geo_data <- function(accession, output_dir) {
 }
 
 # Execute download
-download_geo_data(accession, output_dir)
+download_geo_data(accession, output_dir) 
