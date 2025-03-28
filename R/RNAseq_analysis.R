@@ -15,12 +15,17 @@ for (pkg in required_packages) {
 get_srr_from_srx <- function(srx) {
   tryCatch({
     message(paste("  Getting SRR accessions for", srx))
-    # Use esearch and elink to get SRR accessions from SRX
-    cmd <- paste("esearch -db sra -query", srx, "| elink -target sra | efetch -format docsum | xtract -pattern DocumentSummary -element Run@acc")
+    # Use efetch with runinfo format to get SRR accessions from SRX
+    cmd <- paste("efetch -db sra -id", srx, "-format runinfo | cut -d',' -f1")
     message(paste("  Running command:", cmd))
     
     # Execute the command and capture output
     srr_ids <- system(cmd, intern = TRUE)
+    
+    # Remove header row if present
+    if (length(srr_ids) > 0 && srr_ids[1] == "Run") {
+      srr_ids <- srr_ids[-1]
+    }
     
     if (length(srr_ids) == 0) {
       message("  No SRR accessions found")
