@@ -239,14 +239,19 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
         Sys.sleep(delay)
       }
       
+      # Set options for GEOquery
+      options('download.file.method.GEOquery'='curl')
+      options('GEOquery.inmemory.gpl'=FALSE)
+      
       # Try to download with different methods
       tryCatch({
-        # First try with GSEMatrix=TRUE
-        gset <- getGEO(accession, GSEMatrix = TRUE)
+        # First try with GSEMatrix=TRUE and destdir specified
+        message("  Attempting download with GSEMatrix=TRUE...")
+        gset <- getGEO(accession, GSEMatrix = TRUE, destdir = "temp")
       }, error = function(e) {
         message("  First attempt failed, trying without GSEMatrix...")
         # If that fails, try without GSEMatrix
-        gset <- getGEO(accession, GSEMatrix = FALSE)
+        gset <- getGEO(accession, GSEMatrix = FALSE, destdir = "temp")
       })
       
       # Handle case where getGEO returns a list
@@ -267,8 +272,9 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
         # On final attempt, try to get supplementary files directly
         message("  All attempts failed, trying to get supplementary files directly...")
         tryCatch({
-          # Try to get supplementary files
-          sfiles <- getGEOSuppFiles(accession)
+          # Try to get supplementary files with curl method
+          options('download.file.method.GEOquery'='curl')
+          sfiles <- getGEOSuppFiles(accession, baseDir = "temp")
           if (!is.null(sfiles) && nrow(sfiles) > 0) {
             message("  Successfully retrieved supplementary files")
             # Create a minimal GEOData object with the supplementary files
@@ -281,6 +287,35 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
           }
         }, error = function(e2) {
           message(paste("  Supplementary files retrieval failed:", e2$message))
+        })
+        
+        # Try one last time with direct FTP access
+        message("  Attempting direct FTP access...")
+        tryCatch({
+          ftp_url <- paste0("ftp://ftp.ncbi.nlm.nih.gov/geo/series/", 
+                          substr(accession, 1, 6), "nnn/", accession, "/")
+          message(paste("  Checking FTP URL:", ftp_url))
+          
+          # Try to get the series matrix file directly
+          matrix_url <- paste0(ftp_url, accession, "_series_matrix.txt.gz")
+          message(paste("  Attempting to download:", matrix_url))
+          
+          # Create temp directory if it doesn't exist
+          dir.create("temp", showWarnings = FALSE, recursive = TRUE)
+          
+          # Download the file
+          download.file(matrix_url, 
+                       destfile = file.path("temp", paste0(accession, "_series_matrix.txt.gz")),
+                       mode = "wb")
+          
+          # Try to read the downloaded file
+          gset <- getGEO(accession, GSEMatrix = TRUE, destdir = "temp")
+          if (!is.null(gset)) {
+            message("  Successfully retrieved data through direct FTP")
+            return(gset)
+          }
+        }, error = function(e3) {
+          message(paste("  Direct FTP access failed:", e3$message))
         })
         
         stop(paste("Failed to download after", max_attempts, "attempts:", e$message))
@@ -296,6 +331,9 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
 process_dataset <- function(accession) {
   tryCatch({
     message(paste("Processing dataset:", accession))
+    
+    # Create temp directory if it doesn't exist
+    dir.create("temp", showWarnings = FALSE, recursive = TRUE)
     
     # Path to your GDS table
     gds_df <- read.csv("gds_table.csv")
@@ -333,6 +371,8 @@ process_dataset <- function(accession) {
       for (file in header_info$supplementary_file) {
         message(paste("  Downloading:", file))
         tryCatch({
+          # Try to download with curl method
+          options('download.file.method.GEOquery'='curl')
           download.file(file, destfile = file.path(suppl_dir, basename(file)), mode = "wb")
         }, error = function(e) {
           message(paste("    Failed to download:", file, "-", e$message))
