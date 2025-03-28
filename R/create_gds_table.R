@@ -59,9 +59,13 @@ for (line in gds_text) {
   } else if (grepl("^FTP download:", line)) {
     current_entry$ftp <- sub("^FTP download:\\s*", "", line)
   } else if (grepl("^Series\\s+Accession:", line)) {
-    current_entry$accession <- sub("^Series\\s+Accession:\\s*", "", line)
-  } else if (grepl("^ID:", line)) {
-    current_entry$id <- sub("^ID:\\s*", "", line)
+    # Extract both accession and ID from the line
+    full_line <- sub("^Series\\s+Accession:\\s*", "", line)
+    parts <- strsplit(full_line, "\t")[[1]]
+    current_entry$accession <- parts[1]
+    if (length(parts) > 1) {
+      current_entry$id <- sub("^ID:\\s*", "", parts[2])
+    }
   }
 }
 
