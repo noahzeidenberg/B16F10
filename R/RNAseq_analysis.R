@@ -227,6 +227,33 @@ download_microarray_data <- function(gsm_data, gsm_dir) {
   })
 }
 
+# Function to safely download GEO data with retries
+safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
+  for (attempt in 1:max_attempts) {
+    tryCatch({
+      message(paste("Attempt", attempt, "of", max_attempts, "to download", accession))
+      
+      # Add delay between attempts
+      if (attempt > 1) {
+        message(paste("Waiting", delay, "seconds before retry..."))
+        Sys.sleep(delay)
+      }
+      
+      # Try to download
+      gset <- getGEO(accession, GSEMatrix = TRUE)
+      return(gset)
+      
+    }, error = function(e) {
+      if (attempt == max_attempts) {
+        stop(paste("Failed to download after", max_attempts, "attempts:", e$message))
+      } else {
+        message(paste("Attempt", attempt, "failed:", e$message))
+        return(NULL)
+      }
+    })
+  }
+}
+
 # Function to process a single dataset
 process_dataset <- function(accession) {
   tryCatch({
@@ -234,9 +261,16 @@ process_dataset <- function(accession) {
     results_dir <- file.path("results", accession)
     dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
     
-    # Get GEO data
+    # Get GEO data with retries
     message("\nDownloading GEO metadata...")
-    gset <- getGEO(accession, GSEMatrix = TRUE)
+    gset <- safe_getGEO(accession)
+    
+    if (is.null(gset)) {
+      message(paste("Failed to download metadata for", accession))
+      return(NULL)
+    }
+    
+    # Save the successful download
     saveRDS(gset, file = file.path(results_dir, paste0(accession, "_geo_object.rds")))
     metadata <- pData(gset[[1]])
     write.csv(metadata, file = file.path(results_dir, paste0(accession, "_metadata.csv")))
@@ -414,12 +448,19 @@ if (!dir.exists("results")) {
   dir.create("results")
 }
 
-# Process each dataset
+# Process each dataset with delay between attempts
 results <- list()
-for (accession in gds_df$Accession) {
+for (i in seq_along(gds_df$Accession)) {
+  accession <- gds_df$Accession[i]
   tryCatch({
-    message(paste("\nProcessing dataset:", accession))
+    message(paste("\nProcessing dataset", i, "of", nrow(gds_df), ":", accession))
     results[[accession]] <- process_dataset(accession)
+    
+    # Add delay between datasets to avoid overwhelming the server
+    if (i < nrow(gds_df)) {
+      message("Waiting 5 seconds before next dataset...")
+      Sys.sleep(5)
+    }
   }, error = function(e) {
     message(paste("Error processing", accession, ":", e$message))
   })
