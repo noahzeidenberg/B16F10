@@ -11,65 +11,18 @@ for (pkg in required_packages) {
   library(pkg, character.only = TRUE)
 }
 
-# Read the PMID dataframe
-pmid_df <- read.csv("PMID_df_test.csv")
+# Read the GDS table subset
+gds_df <- read.csv("gds_table_subset.csv")
 
 # Function to check if a GSE is RNA-seq
 is_rnaseq <- function(gse_id) {
   tryCatch({
-    message(paste("\nChecking RNA-seq status for", gse_id))
     gse <- getGEO(gse_id)
-    
-    # Helper function to safely extract metadata
-    get_metadata <- function(gse, field) {
-      tryCatch({
-        values <- unlist(lapply(gse, function(x) {
-          if (field %in% names(x@experimentData@other)) {
-            return(x@experimentData@other[[field]])
-          }
-          return(NULL)
-        }))
-        return(values[!is.null(values)])
-      }, error = function(e) {
-        message(paste("Error extracting", field, ":", e$message))
-        return(NULL)
-      })
-    }
-    
-    # Check multiple fields for RNA-seq indicators
-    rnaseq_indicators <- c(
-      # Check technology type
-      any(grepl("RNA-seq|RNA sequencing|RNA-Seq|RNA_SEQ", 
-                get_metadata(gse, "type"), 
-                ignore.case = TRUE)),
-      
-      # Check library strategy
-      any(grepl("RNA-Seq|RNA_SEQ|RNA|TRANSCRIPTOMIC", 
-                get_metadata(gse, "library_strategy"), 
-                ignore.case = TRUE)),
-      
-      # Check library source
-      any(grepl("TRANSCRIPTOMIC|RNA", 
-                get_metadata(gse, "library_source"), 
-                ignore.case = TRUE)),
-      
-      # Check instrument model
-      any(grepl("ILLUMINA|NEXTSEQ|HISEQ|NOVASEQ|MISEQ", 
-                get_metadata(gse, "instrument_model"), 
-                ignore.case = TRUE))
-    )
-    
-    # Debug: Print the values being checked
-    message("Checking fields:")
-    message("Type:", paste(get_metadata(gse, "type"), collapse=", "))
-    message("Library Strategy:", paste(get_metadata(gse, "library_strategy"), collapse=", "))
-    message("Library Source:", paste(get_metadata(gse, "library_source"), collapse=", "))
-    message("Instrument Model:", paste(get_metadata(gse, "instrument_model"), collapse=", "))
-    
-    is_rnaseq <- any(rnaseq_indicators)
-    message(paste("Is RNA-seq:", is_rnaseq))
-    return(is_rnaseq)
-    
+    # Check if it's RNA-seq by looking at the technology type and library strategy
+    tech <- unique(unlist(lapply(gse, function(x) x@experimentData@other$type)))
+    lib_strategy <- unique(unlist(lapply(gse, function(x) x@phenoData@data$library_strategy)))
+    return(any(grepl("RNA-seq|RNA sequencing", tech, ignore.case = TRUE)) ||
+           any(grepl("RNA-Seq", lib_strategy, ignore.case = TRUE)))
   }, error = function(e) {
     message(paste("Error checking RNA-seq status for", gse_id, ":", e$message))
     return(FALSE)
@@ -78,7 +31,7 @@ is_rnaseq <- function(gse_id) {
 
 # Function to process a single RNA-seq dataset
 process_rnaseq <- function(gse_id) {
-  message(paste("\nProcessing", gse_id))
+  message(paste("Processing", gse_id))
   
   tryCatch({
     # Download the data
@@ -88,9 +41,49 @@ process_rnaseq <- function(gse_id) {
     expr_matrix <- exprs(gse[[1]])
     pheno_data <- pData(gse[[1]])
     
-    # Debug: Print matrix dimensions
-    message(paste("Expression matrix dimensions:", dim(expr_matrix)[1], "x", dim(expr_matrix)[2]))
-    message(paste("Phenotype data dimensions:", dim(pheno_data)[1], "x", dim(pheno_data)[2]))
+    # Get experiment metadata
+    exp_metadata <- gse[[1]]@experimentData
+    
+    # Create results directory for this dataset
+    results_dir <- file.path("results", gse_id)
+    dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
+    
+    # Save metadata
+    metadata_list <- list(
+      experiment = list(
+        title = exp_metadata@title,
+        abstract = exp_metadata@abstract,
+        pubMedIds = exp_metadata@pubMedIds,
+        type = exp_metadata@other$type,
+        platform_id = exp_metadata@other$platform_id,
+        overall_design = exp_metadata@other$overall_design
+      ),
+      samples = pheno_data
+    )
+    
+    saveRDS(metadata_list, file = file.path(results_dir, paste0(gse_id, "_metadata.rds")))
+    
+    # Check for supplementary files with counts
+    supp_files <- exp_metadata@other$supplementary_file
+    if (!is.null(supp_files)) {
+      message("Found supplementary files")
+      message(paste("Files:", paste(supp_files, collapse="\n    ")))
+      
+      # Look for count files
+      count_files <- supp_files[grep("counts|Counts", supp_files)]
+      if (length(count_files) > 0) {
+        message("Found count files")
+        # Download and process count files
+        for (file in count_files) {
+          message(paste("Downloading:", file))
+          tryCatch({
+            download.file(file, destfile = file.path(results_dir, basename(file)), mode = "wb")
+          }, error = function(e) {
+            message(paste("Failed to download:", file, "-", e$message))
+          })
+        }
+      }
+    }
     
     # Create DESeq2 object
     dds <- DESeqDataSetFromMatrix(
@@ -110,22 +103,15 @@ process_rnaseq <- function(gse_id) {
     res_df$gene <- rownames(res_df)
     
     # Perform KEGG pathway analysis
-    # Convert gene IDs to ENTREZ IDs (you might need to adjust this based on your data)
     gene_list <- res_df$gene[!is.na(res_df$padj) & res_df$padj < 0.05]
     
     if (length(gene_list) > 0) {
-      message(paste("Found", length(gene_list), "significant genes"))
-      
       kegg_result <- enrichKEGG(
         gene = gene_list,
         organism = 'mmu',
         keyType = 'kegg',
         pvalueCutoff = 0.05
       )
-      
-      # Create results directory for this dataset
-      results_dir <- file.path("results", gse_id)
-      dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
       
       # Save results
       write.csv(res_df, file = file.path(results_dir, paste0(gse_id, "_DESeq2_results.csv")))
@@ -157,7 +143,7 @@ if (!dir.exists("results")) {
 
 # Process each dataset
 results <- list()
-for (gse_id in pmid_df$Accession_ID) {
+for (gse_id in gds_df$Accession) {
   tryCatch({
     if (is_rnaseq(gse_id)) {
       message(paste("\nProcessing RNA-seq dataset:", gse_id))
