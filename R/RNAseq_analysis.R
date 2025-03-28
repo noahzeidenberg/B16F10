@@ -51,30 +51,43 @@ get_next_api_key <- function() {
 
 # Function to handle rate limiting with exponential backoff and API key rotation
 handle_rate_limit <- function(fn, max_retries = 3, initial_delay = 1) {
+  last_error <- NULL
   for (i in 1:max_retries) {
     tryCatch({
       return(fn())
     }, error = function(e) {
-      if (grepl("429|403|404", e$message)) {
+      last_error <- e
+      if (grepl("429|403|404|Failed to perform HTTP request|cannot open the connection", e$message)) {
         delay <- initial_delay * (2^(i-1))  # Exponential backoff
-        message(paste("Rate limit hit. Waiting", delay, "seconds before retry", i, "of", max_retries))
+        message(paste("Rate limit or connection error hit. Waiting", delay, "seconds before retry", i, "of", max_retries))
         
         # Rotate to next API key
         new_key <- get_next_api_key()
         Sys.setenv(ENTREZ_KEY = new_key)
         message(paste("Rotating to next API key:", substr(new_key, 1, 8), "..."))
         
-        Sys.sleep(delay)
+        # Add a small random delay to prevent thundering herd
+        Sys.sleep(delay + runif(1, 0, 1))
       } else {
         stop(e)
       }
     })
+  }
+  
+  # If we get here, all retries failed
+  if (!is.null(last_error)) {
+    message(paste("All retries failed. Last error:", last_error$message))
+    stop(last_error)
   }
   stop("Max retries reached")
 }
 
 # Initialize with first API key
 Sys.setenv(ENTREZ_KEY = get_next_api_key())
+
+# Set options for better error handling
+options(warn = 1)  # Show warnings immediately
+options(timeout = 300)  # Increase timeout to 5 minutes
 
 # Read the GDS table subset
 gds_df <- read.csv("gds_table_subset.csv")
@@ -110,6 +123,43 @@ process_rnaseq <- function(gse_id) {
     expr_matrix <- exprs(gse[[1]])
     pheno_data <- pData(gse[[1]])
     
+    # Check if expression matrix is empty or all zeros
+    if (nrow(expr_matrix) == 0 || ncol(expr_matrix) == 0) {
+      message("Expression matrix is empty")
+      return(NULL)
+    }
+    
+    if (all(expr_matrix == 0)) {
+      message("All values in expression matrix are zero")
+      # Try to get supplementary files with counts
+      supp_files <- gse[[1]]@experimentData@other$supplementary_file
+      if (!is.null(supp_files)) {
+        message("Found supplementary files")
+        message(paste("Files:", paste(supp_files, collapse="\n    ")))
+        
+        # Look for count files
+        count_files <- supp_files[grep("counts|Counts|RAW", supp_files)]
+        if (length(count_files) > 0) {
+          message("Found count files")
+          # Download and process count files
+          for (file in count_files) {
+            message(paste("Downloading:", file))
+            tryCatch({
+              download.file(file, destfile = file.path(results_dir, basename(file)), mode = "wb")
+              # If it's a tar file, extract it
+              if (grepl("\\.tar$", file)) {
+                system(paste("tar -xf", file.path(results_dir, basename(file)), "-C", results_dir))
+              }
+            }, error = function(e) {
+              message(paste("Failed to download:", file, "-", e$message))
+            })
+          }
+          return(NULL)  # Skip DESeq2 analysis for now
+        }
+      }
+      return(NULL)
+    }
+    
     # Get experiment metadata
     exp_metadata <- gse[[1]]@experimentData
     
@@ -139,7 +189,7 @@ process_rnaseq <- function(gse_id) {
       message(paste("Files:", paste(supp_files, collapse="\n    ")))
       
       # Look for count files
-      count_files <- supp_files[grep("counts|Counts", supp_files)]
+      count_files <- supp_files[grep("counts|Counts|RAW", supp_files)]
       if (length(count_files) > 0) {
         message("Found count files")
         # Download and process count files
@@ -147,6 +197,10 @@ process_rnaseq <- function(gse_id) {
           message(paste("Downloading:", file))
           tryCatch({
             download.file(file, destfile = file.path(results_dir, basename(file)), mode = "wb")
+            # If it's a tar file, extract it
+            if (grepl("\\.tar$", file)) {
+              system(paste("tar -xf", file.path(results_dir, basename(file)), "-C", results_dir))
+            }
           }, error = function(e) {
             message(paste("Failed to download:", file, "-", e$message))
           })
