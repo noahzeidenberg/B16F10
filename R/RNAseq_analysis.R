@@ -243,6 +243,29 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
       options('download.file.method.GEOquery'='curl')
       options('GEOquery.inmemory.gpl'=FALSE)
       
+      # Create temp directory if it doesn't exist
+      dir.create("temp", showWarnings = FALSE, recursive = TRUE)
+      
+      # Check if we already have the matrix file
+      matrix_file <- file.path("temp", paste0(accession, "_series_matrix.txt.gz"))
+      if (file.exists(matrix_file)) {
+        message("  Found cached matrix file, attempting to read it...")
+        tryCatch({
+          gset <- getGEO(accession, GSEMatrix = TRUE, destdir = "temp")
+          if (!is.null(gset)) {
+            if (is.list(gset)) {
+              gset <- gset[[1]]
+            }
+            if (inherits(gset, "GEOData")) {
+              message("  Successfully read cached matrix file")
+              return(gset)
+            }
+          }
+        }, error = function(e) {
+          message(paste("  Failed to read cached file:", e$message))
+        })
+      }
+      
       # Try to download with different methods
       tryCatch({
         # First try with GSEMatrix=TRUE and destdir specified
@@ -292,27 +315,34 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
         # Try one last time with direct FTP access
         message("  Attempting direct FTP access...")
         tryCatch({
-          ftp_url <- paste0("ftp://ftp.ncbi.nlm.nih.gov/geo/series/", 
-                          substr(accession, 1, 6), "nnn/", accession, "/")
+          # Extract the series identifier (first 6 characters)
+          series_id <- substr(accession, 1, 6)
+          
+          # Construct the correct FTP URL
+          ftp_url <- paste0("ftp://ftp.ncbi.nlm.nih.gov/geo/series/", series_id, "nnn/", accession, "/")
           message(paste("  Checking FTP URL:", ftp_url))
           
           # Try to get the series matrix file directly
           matrix_url <- paste0(ftp_url, accession, "_series_matrix.txt.gz")
           message(paste("  Attempting to download:", matrix_url))
           
-          # Create temp directory if it doesn't exist
-          dir.create("temp", showWarnings = FALSE, recursive = TRUE)
-          
           # Download the file
           download.file(matrix_url, 
-                       destfile = file.path("temp", paste0(accession, "_series_matrix.txt.gz")),
+                       destfile = matrix_file,
                        mode = "wb")
           
-          # Try to read the downloaded file
-          gset <- getGEO(accession, GSEMatrix = TRUE, destdir = "temp")
-          if (!is.null(gset)) {
-            message("  Successfully retrieved data through direct FTP")
-            return(gset)
+          if (file.exists(matrix_file)) {
+            # Try to read the downloaded file
+            gset <- getGEO(accession, GSEMatrix = TRUE, destdir = "temp")
+            if (!is.null(gset)) {
+              if (is.list(gset)) {
+                gset <- gset[[1]]
+              }
+              if (inherits(gset, "GEOData")) {
+                message("  Successfully retrieved data through direct FTP")
+                return(gset)
+              }
+            }
           }
         }, error = function(e3) {
           message(paste("  Direct FTP access failed:", e3$message))
