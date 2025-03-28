@@ -384,20 +384,21 @@ process_dataset <- function(accession) {
     output_dir <- file.path("results", accession)
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
     
-    # Get the header information
-    header_info <- gsm_data@header
+    # Get the metadata from experimentData
+    exp_data <- gsm_data@experimentData
+    pheno_data <- gsm_data@phenoData@data
     
     # Check if we have supplementary files
-    if (!is.null(header_info$supplementary_file)) {
+    if (!is.null(exp_data@other$supplementary_file)) {
       message("  Found supplementary files")
-      message(paste("  Files:", paste(header_info$supplementary_file, collapse="\n    ")))
+      message(paste("  Files:", paste(exp_data@other$supplementary_file, collapse="\n    ")))
       
       # Create supplementary files directory
       suppl_dir <- file.path(output_dir, "supplementary_files")
       dir.create(suppl_dir, recursive = TRUE, showWarnings = FALSE)
       
       # Download supplementary files
-      for (file in header_info$supplementary_file) {
+      for (file in exp_data@other$supplementary_file) {
         message(paste("  Downloading:", file))
         tryCatch({
           # Try to download with curl method
@@ -410,7 +411,7 @@ process_dataset <- function(accession) {
     }
     
     # Check if it's sequencing data
-    if (is_sequencing_data(header_info)) {
+    if (is_sequencing_data(pheno_data)) {
       message(paste("Dataset", accession, "is sequencing data"))
       # Get SRX accessions
       srx_ids <- get_srx_from_gsm(accession)
@@ -427,7 +428,7 @@ process_dataset <- function(accession) {
           message(paste("Saved", length(srr_ids), "SRR IDs"))
         }
       }
-    } else if (is_microarray_data(header_info)) {
+    } else if (is_microarray_data(pheno_data)) {
       message(paste("Dataset", accession, "is microarray data"))
       # Download microarray data
       success <- download_microarray_data(gsm_data, output_dir)
@@ -441,9 +442,11 @@ process_dataset <- function(accession) {
     }
     
     # Save metadata
-    write.csv(as.data.frame(header_info), 
-              file.path(output_dir, "metadata.csv"), 
-              row.names = TRUE)
+    metadata <- list(
+      experiment_data = as.list(exp_data),
+      pheno_data = pheno_data
+    )
+    saveRDS(metadata, file.path(output_dir, "metadata.rds"))
     
     message(paste("Completed processing dataset:", accession))
     return(TRUE)
