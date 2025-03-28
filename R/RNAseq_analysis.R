@@ -115,8 +115,9 @@ get_srr_from_srx <- function(srx) {
     current_key <- Sys.getenv("ENTREZ_KEY")
     
     # Set API key as environment variable for the command
+    # First search in sra_experiment database to get the experiment ID
     cmd <- paste("export NCBI_API_KEY='", current_key, "' && ",
-                "esearch -db sra -query ", srx, 
+                "esearch -db sra_experiment -query ", srx, 
                 " | elink -target sra", 
                 " | efetch -format docsum", 
                 " | xtract -pattern DocumentSummary -element Run@acc", sep="")
