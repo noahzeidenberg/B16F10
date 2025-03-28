@@ -47,22 +47,28 @@ get_srx_from_gsm <- function(gsm) {
     # Get the GSM data
     gsm_data <- getGEO(gsm)
     
-    # Extract the 'relation' field
-    relations <- gsm_data@header["relation"][[1]]
+    # Handle case where getGEO returns a list
+    if (is.list(gsm_data)) {
+      gsm_data <- gsm_data[[1]]
+    }
+    
+    # Extract the 'relation' field from phenoData
+    pheno_data <- gsm_data@phenoData@data
+    relations <- pheno_data$relation.1
     
     # Find the SRA link
-    sra_link <- relations[grep("SRA:", relations)]
+    sra_links <- relations[grep("SRA:", relations)]
     
-    if (length(sra_link) == 0) {
+    if (length(sra_links) == 0) {
       message("  No SRA link found")
       return(NULL)
     }
     
-    # Extract the SRA accession number (SRX ID)
-    sra_acc <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
-    message(paste("  Found SRA accession:", sra_acc))
+    # Extract the SRA accession numbers (SRX IDs)
+    sra_accs <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_links)
+    message(paste("  Found SRA accessions:", paste(sra_accs, collapse=", ")))
     
-    return(sra_acc)
+    return(sra_accs)
   }, error = function(e) {
     message(paste("Warning: Failed to get SRA info for", gsm, ":", e$message))
     return(NULL)
@@ -378,6 +384,11 @@ process_dataset <- function(accession) {
     gsm_data <- safe_getGEO(accession)
     if (is.null(gsm_data)) {
       stop(paste("Failed to retrieve data for accession:", accession))
+    }
+    
+    # Handle case where getGEO returns a list
+    if (is.list(gsm_data)) {
+      gsm_data <- gsm_data[[1]]
     }
     
     # Create output directory
