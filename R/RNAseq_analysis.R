@@ -19,7 +19,8 @@ get_next_api_key <- function() {
   # Get all API keys from environment
   api_keys <- c(
     Sys.getenv("NCBI_API_KEY_1"),
-    Sys.getenv("NCBI_API_KEY_2")
+    Sys.getenv("NCBI_API_KEY_2"),
+    Sys.getenv("NCBI_API_KEY_3")  # Added third key
   )
   
   # Remove any NULL or empty values
@@ -57,7 +58,7 @@ handle_rate_limit <- function(fn, max_retries = 3, initial_delay = 1) {
       return(fn())
     }, error = function(e) {
       last_error <- e
-      if (grepl("429|403|404|Failed to perform HTTP request|cannot open the connection", e$message)) {
+      if (grepl("429|403|404|Failed to perform HTTP request|cannot open the connection|Unrecognized option", e$message)) {
         delay <- initial_delay * (2^(i-1))  # Exponential backoff
         message(paste("Rate limit or connection error hit. Waiting", delay, "seconds before retry", i, "of", max_retries))
         
@@ -85,6 +86,9 @@ handle_rate_limit <- function(fn, max_retries = 3, initial_delay = 1) {
 # Initialize with first API key
 Sys.setenv(ENTREZ_KEY = get_next_api_key())
 
+# Add a small delay between API calls
+Sys.sleep(0.1)  # 100ms delay between calls
+
 # Function to check if data is sequencing data
 is_sequencing_data <- function(metadata) {
   # Check various metadata fields for sequencing indicators
@@ -107,11 +111,14 @@ get_srr_from_srx <- function(srx) {
   tryCatch({
     message(paste("  Getting SRR accessions for", srx))
     
-    # Use esearch and elink with API key
-    cmd <- paste("esearch -api_key $ENTREZ_KEY -db sra -query", srx, 
-                "| elink -api_key $ENTREZ_KEY -target sra", 
-                "| efetch -api_key $ENTREZ_KEY -format docsum", 
-                "| xtract -pattern DocumentSummary -element Run@acc")
+    # Get current API key
+    current_key <- Sys.getenv("ENTREZ_KEY")
+    
+    # Use esearch and elink with API key properly quoted
+    cmd <- paste("esearch -api_key '", current_key, "' -db sra -query ", srx, 
+                " | elink -api_key '", current_key, "' -target sra", 
+                " | efetch -api_key '", current_key, "' -format docsum", 
+                " | xtract -pattern DocumentSummary -element Run@acc", sep="")
     
     message(paste("  Running command:", cmd))
     
