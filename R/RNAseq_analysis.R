@@ -257,216 +257,87 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
 # Function to process a single dataset
 process_dataset <- function(accession) {
   tryCatch({
-    # Create results directory for this dataset
-    results_dir <- file.path("results", accession)
-    dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
+    message(paste("Processing dataset:", accession))
     
-    # Get GEO data with retries
-    message("\nDownloading GEO metadata...")
-    gset <- safe_getGEO(accession)
+    # Path to your GDS table subset
+    gds_df <- read.csv("gds_table_new.csv")
     
-    if (is.null(gset)) {
-      message(paste("Failed to download metadata for", accession))
-      return(NULL)
+    # Get the current row based on the accession number
+    row <- which(gds_df$Accession == accession)
+    
+    if (length(row) == 0) {
+      stop(paste("Accession", accession, "not found in GDS table"))
     }
     
-    # Save the successful download
-    saveRDS(gset, file = file.path(results_dir, paste0(accession, "_geo_object.rds")))
-    metadata <- pData(gset[[1]])
-    write.csv(metadata, file = file.path(results_dir, paste0(accession, "_metadata.csv")))
-    
-    # Debug: Print metadata structure
-    message("\nMetadata structure:")
-    message(paste("Columns:", paste(colnames(metadata), collapse=", ")))
-    message(paste("Number of samples:", nrow(metadata)))
-    
-    # Print relevant fields for debugging
-    message("\nRelevant metadata fields:")
-    relevant_fields <- c("type", "library_strategy", "library_source", "instrument_model", "platform_id")
-    for (field in relevant_fields) {
-      if (field %in% colnames(metadata)) {
-        message(paste(field, ":", paste(unique(metadata[[field]]), collapse=", ")))
-      }
+    # Get the dataset metadata
+    gsm_data <- safe_getGEO(accession)
+    if (is.null(gsm_data)) {
+      stop(paste("Failed to retrieve data for accession:", accession))
     }
     
-    # Create samples directory
-    samples_dir <- file.path(results_dir, "samples")
-    dir.create(samples_dir, recursive = TRUE, showWarnings = FALSE)
+    # Create output directory
+    output_dir <- file.path("results", accession)
+    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
     
-    # Get GSM accessions
-    gsm_accessions <- metadata$geo_accession
-    message(paste("\nFound", length(gsm_accessions), "GSM accessions:", paste(gsm_accessions, collapse=", ")))
-    
-    # Check data type and process accordingly
-    if (is_sequencing_data(metadata)) {
-      message("\nRNA-seq data detected. Fetching SRA information...")
-      
-      # Get SRX accessions for each GSM
-      srx_info <- c()
-      for (gsm in gsm_accessions) {
-        message(paste("\nProcessing", gsm))
+    # Check if it's sequencing data
+    if (is_sequencing_data(gsm_data@header)) {
+      message(paste("Dataset", accession, "is sequencing data"))
+      # Get SRX accessions
+      srx_ids <- get_srx_from_gsm(accession)
+      if (!is.null(srx_ids)) {
+        # Get SRR accessions
+        srr_ids <- lapply(srx_ids, get_srr_from_srx)
+        srr_ids <- unlist(srr_ids[!sapply(srr_ids, is.null)])
         
-        # Create GSM-specific directory
-        gsm_dir <- file.path(samples_dir, gsm)
-        dir.create(gsm_dir, recursive = TRUE, showWarnings = FALSE)
-        
-        # Get GSM data and save RDS
-        gsm_data <- getGEO(gsm)
-        saveRDS(gsm_data, file = file.path(gsm_dir, paste0(gsm, ".rds")))
-        
-        # Get SRX accession
-        srx_id <- get_srx_from_gsm(gsm)
-        if (!is.null(srx_id)) {
-          srx_info <- c(srx_info, srx_id)
+        if (length(srr_ids) > 0) {
+          # Save SRR IDs to file
+          write.csv(data.frame(SRR = srr_ids), 
+                   file.path(output_dir, "srr_ids.csv"), 
+                   row.names = FALSE)
+          message(paste("Saved", length(srr_ids), "SRR IDs"))
         }
       }
-      
-      srx_info <- unique(srx_info)
-      
-      if (length(srx_info) == 0) {
-        stop("Could not find any SRA run accessions for the GSM IDs")
-      }
-      
-      message(paste("\nFound", length(srx_info), "unique SRA accessions:", paste(srx_info, collapse=", ")))
-      
-      # Download and convert SRA files to FASTQ
-      message("\nDownloading and converting SRA files to FASTQ...")
-      for (srx in srx_info) {
-        message(paste("\nProcessing", srx))
-        
-        # Get SRR accessions for this SRX
-        srr_ids <- get_srr_from_srx(srx)
-        if (is.null(srr_ids)) {
-          message(paste("  Skipping", srx, "as no SRR accessions were found"))
-          next
-        }
-        
-        # Find the corresponding GSM for this SRX
-        for (gsm in gsm_accessions) {
-          gsm_dir <- file.path(samples_dir, gsm)
-          sra_dir <- file.path(gsm_dir, "SRA")
-          fastq_dir <- file.path(sra_dir, "FASTQ")
-          
-          # Create necessary directories
-          dir.create(sra_dir, recursive = TRUE, showWarnings = FALSE)
-          dir.create(fastq_dir, recursive = TRUE, showWarnings = FALSE)
-          
-          # Download and convert each SRR
-          for (srr in srr_ids) {
-            message(paste("  Processing SRR:", srr))
-            
-            # Check if SRA toolkit commands are available
-            if (system("which prefetch", ignore.stdout = TRUE, ignore.stderr = TRUE) != 0) {
-              message("  Error: prefetch command not found. Please ensure SRA toolkit is installed and in PATH")
-              next
-            }
-            
-            if (system("which fasterq-dump", ignore.stdout = TRUE, ignore.stderr = TRUE) != 0) {
-              message("  Error: fasterq-dump command not found. Please ensure SRA toolkit is installed and in PATH")
-              next
-            }
-            
-            # Use prefetch and fasterq-dump for better performance
-            cmd <- paste("prefetch", srr, "&&",           # don't use --type raw
-                        "fasterq-dump", srr,
-                        "--outdir", fastq_dir,
-                        "--split-files",
-                        "--threads 8")
-            
-            message(paste("  Running command:", cmd))
-            # Execute the command and check for errors
-            result <- system(cmd)
-            if (result != 0) {
-              message(paste("  Warning: Failed to download/convert", srr, "with exit code", result))
-              message("  Trying alternative method...")
-              
-              # Check if fastq-dump is available
-              if (system("which fastq-dump", ignore.stdout = TRUE, ignore.stderr = TRUE) != 0) {
-                message("  Error: fastq-dump command not found. Please ensure SRA toolkit is installed and in PATH")
-                next
-              }
-              
-              # Try alternative method using fastq-dump
-              alt_cmd <- paste("fastq-dump --split-files --gzip",
-                              "--outdir", fastq_dir, srr)
-              message(paste("  Running alternative command:", alt_cmd))
-              alt_result <- system(alt_cmd)
-              if (alt_result != 0) {
-                message(paste("  Error: Both download methods failed for", srr))
-                message("  Please ensure SRA toolkit is properly installed and configured")
-              }
-            } else {
-              # Move the SRA file to the SRA directory
-              sra_file <- file.path(".", paste0(srr, ".sra"))
-              if (file.exists(sra_file)) {
-                file.rename(sra_file, file.path(sra_dir, paste0(srr, ".sra")))
-              }
-              # Compress the FASTQ files
-              message("  Compressing FASTQ files...")
-              system(paste("gzip", file.path(fastq_dir, paste0(srr, "_*.fastq"))))
-            }
-          }
-        }
-      }
-    } else if (is_microarray_data(metadata)) {
-      message("\nMicroarray data detected. Downloading array files...")
-      
-      # Process each GSM
-      for (gsm in gsm_accessions) {
-        message(paste("\nProcessing", gsm))
-        
-        # Create GSM-specific directory
-        gsm_dir <- file.path(samples_dir, gsm)
-        dir.create(gsm_dir, recursive = TRUE, showWarnings = FALSE)
-        
-        # Get GSM data and save RDS
-        gsm_data <- getGEO(gsm)
-        saveRDS(gsm_data, file = file.path(gsm_dir, paste0(gsm, ".rds")))
-        
-        # Download microarray data
-        if (!download_microarray_data(gsm_data, gsm_dir)) {
-          message(paste("  Warning: Failed to download microarray data for", gsm))
-        }
+    } else if (is_microarray_data(gsm_data@header)) {
+      message(paste("Dataset", accession, "is microarray data"))
+      # Download microarray data
+      success <- download_microarray_data(gsm_data, output_dir)
+      if (success) {
+        message("Successfully downloaded microarray data")
+      } else {
+        message("Failed to download microarray data")
       }
     } else {
-      message("\nThis does not appear to be RNA-seq or microarray data. Available metadata:")
-      print(metadata[1, ])
+      message(paste("Dataset", accession, "is neither sequencing nor microarray data"))
     }
     
-    message("\nSuccessfully processed ", accession)
+    # Save metadata
+    write.csv(as.data.frame(gsm_data@header), 
+              file.path(output_dir, "metadata.csv"), 
+              row.names = TRUE)
+    
+    message(paste("Completed processing dataset:", accession))
+    return(TRUE)
+    
   }, error = function(e) {
-    message(paste("Error processing", accession, ":", e$message))
-    return(NULL)
+    message(paste("Error processing dataset", accession, ":", e$message))
+    return(FALSE)
   })
 }
 
-# Read the GDS table subset
-gds_df <- read.csv("gds_table_new.csv")
-
-# Create main results directory if it doesn't exist
-if (!dir.exists("results")) {
-  dir.create("results")
+# Main script logic
+if (!interactive()) {
+  # Get the accession number from command-line argument
+  if (length(commandArgs()) > 1) {
+    accession <- as.character(commandArgs()[2])
+  } else {
+    stop("No accession number provided")
+  }
+  
+  # Call the function to process the dataset
+  success <- process_dataset(accession)
+  
+  # Exit with appropriate status code
+  if (!success) {
+    quit(status = 1)
+  }
 }
-
-# Process each dataset with delay between attempts
-results <- list()
-for (i in seq_along(gds_df$Accession)) {
-  accession <- gds_df$Accession[i]
-  tryCatch({
-    message(paste("\nProcessing dataset", i, "of", nrow(gds_df), ":", accession))
-    results[[accession]] <- process_dataset(accession)
-    
-    # Add delay between datasets to avoid overwhelming the server
-    if (i < nrow(gds_df)) {
-      message("Waiting 5 seconds before next dataset...")
-      Sys.sleep(5)
-    }
-  }, error = function(e) {
-    message(paste("Error processing", accession, ":", e$message))
-  })
-}
-
-# Save session info
-sink("results/session_info.txt")
-sessionInfo()
-sink() 
