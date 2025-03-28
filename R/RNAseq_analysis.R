@@ -4,12 +4,77 @@
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
 
-required_packages <- c("GEOquery", "DESeq2", "clusterProfiler", "org.Mm.eg.db", "tidyverse")
+required_packages <- c("GEOquery", "DESeq2", "clusterProfiler", "org.Mm.eg.db", "tidyverse", "dotenv")
 for (pkg in required_packages) {
   if (!requireNamespace(pkg, quietly = TRUE))
     BiocManager::install(pkg)
   library(pkg, character.only = TRUE)
 }
+
+# Load environment variables from .env file
+load_dot_env()
+
+# Function to get next API key
+get_next_api_key <- function() {
+  # Get all API keys from environment
+  api_keys <- c(
+    Sys.getenv("NCBI_API_KEY_1"),
+    Sys.getenv("NCBI_API_KEY_2")
+  )
+  
+  # Remove any NULL or empty values
+  api_keys <- api_keys[!is.null(api_keys) & api_keys != ""]
+  
+  if (length(api_keys) == 0) {
+    stop("No NCBI API keys found in environment variables. Please check your .env file.")
+  }
+  
+  # Get the current key from environment
+  current_key <- Sys.getenv("ENTREZ_KEY")
+  
+  # If no current key, use the first one
+  if (current_key == "") {
+    return(api_keys[1])
+  }
+  
+  # Find the current key's position
+  current_pos <- which(api_keys == current_key)
+  
+  # If current key not found or it's the last one, return the first key
+  if (length(current_pos) == 0 || current_pos == length(api_keys)) {
+    return(api_keys[1])
+  }
+  
+  # Otherwise, return the next key
+  return(api_keys[current_pos + 1])
+}
+
+# Function to handle rate limiting with exponential backoff and API key rotation
+handle_rate_limit <- function(fn, max_retries = 3, initial_delay = 1) {
+  for (i in 1:max_retries) {
+    tryCatch({
+      return(fn())
+    }, error = function(e) {
+      if (grepl("429|403|404", e$message)) {
+        delay <- initial_delay * (2^(i-1))  # Exponential backoff
+        message(paste("Rate limit hit. Waiting", delay, "seconds before retry", i, "of", max_retries))
+        
+        # Rotate to next API key
+        new_key <- get_next_api_key()
+        Sys.setenv(ENTREZ_KEY = new_key)
+        message(paste("Rotating to next API key:", substr(new_key, 1, 8), "..."))
+        
+        Sys.sleep(delay)
+      } else {
+        stop(e)
+      }
+    })
+  }
+  stop("Max retries reached")
+}
+
+# Initialize with first API key
+Sys.setenv(ENTREZ_KEY = get_next_api_key())
 
 # Read the GDS table subset
 gds_df <- read.csv("gds_table_subset.csv")
@@ -17,7 +82,9 @@ gds_df <- read.csv("gds_table_subset.csv")
 # Function to check if a GSE is RNA-seq
 is_rnaseq <- function(gse_id) {
   tryCatch({
-    gse <- getGEO(gse_id)
+    gse <- handle_rate_limit(function() {
+      getGEO(gse_id)
+    })
     # Check if it's RNA-seq by looking at the technology type and library strategy
     tech <- unique(unlist(lapply(gse, function(x) x@experimentData@other$type)))
     lib_strategy <- unique(unlist(lapply(gse, function(x) x@phenoData@data$library_strategy)))
@@ -34,8 +101,10 @@ process_rnaseq <- function(gse_id) {
   message(paste("Processing", gse_id))
   
   tryCatch({
-    # Download the data
-    gse <- getGEO(gse_id)
+    # Download the data with rate limiting
+    gse <- handle_rate_limit(function() {
+      getGEO(gse_id)
+    })
     
     # Extract expression matrix and phenotype data
     expr_matrix <- exprs(gse[[1]])
