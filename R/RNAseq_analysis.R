@@ -115,12 +115,11 @@ get_srr_from_srx <- function(srx) {
     current_key <- Sys.getenv("ENTREZ_KEY")
     
     # Set API key as environment variable for the command
-    # First search in sra_experiment database to get the experiment ID
+    # Search directly in sra database and get runinfo format
     cmd <- paste("export NCBI_API_KEY='", current_key, "' && ",
-                "esearch -db sra_experiment -query ", srx, 
-                " | elink -target sra", 
-                " | efetch -format docsum", 
-                " | xtract -pattern DocumentSummary -element Run@acc", sep="")
+                "esearch -db sra -query ", srx, 
+                " | efetch -format runinfo", 
+                " | cut -d',' -f1", sep="")
     
     message(paste("  Running command:", cmd))
     
@@ -128,6 +127,11 @@ get_srr_from_srx <- function(srx) {
     srr_ids <- handle_rate_limit(function() {
       system(cmd, intern = TRUE)
     })
+    
+    # Remove header row if present
+    if (length(srr_ids) > 0 && srr_ids[1] == "Run") {
+      srr_ids <- srr_ids[-1]
+    }
     
     if (length(srr_ids) == 0) {
       message("  No SRR accessions found")
