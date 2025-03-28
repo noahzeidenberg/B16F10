@@ -19,9 +19,16 @@ log_message() {
 # Extract RNA-seq datasets from GDS table
 log_message "Extracting RNA-seq datasets from GDS table..."
 Rscript -e '
-gds_df <- read.csv("gds_table.csv")
+# Read the GDS table
+gds_df <- read.csv("gds_table.csv", stringsAsFactors=FALSE)
+
+# Filter for RNA-seq datasets
 rna_seq_datasets <- gds_df[grep("sequencing", gds_df$Type, ignore.case=TRUE), "Accession"]
-write.csv(rna_seq_datasets, "rna_seq_datasets.csv", row.names=FALSE)
+
+# Remove any quotes and write to file
+rna_seq_datasets <- gsub("\"", "", rna_seq_datasets)
+write.table(rna_seq_datasets, "rna_seq_datasets.txt", 
+            row.names=FALSE, col.names=FALSE, quote=FALSE)
 '
 
 # Process each RNA-seq dataset
@@ -30,6 +37,6 @@ while IFS= read -r accession; do
         log_message "Processing dataset: $accession"
         Rscript R/RNAseq_analysis.R "$accession" 2>&1 | tee -a "${BASE_DIR}/logs/RNAseq_${accession}.log"
     fi
-done < rna_seq_datasets.csv
+done < rna_seq_datasets.txt
 
 log_message "All datasets processed" 
