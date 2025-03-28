@@ -239,8 +239,15 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
         Sys.sleep(delay)
       }
       
-      # Try to download
-      gset <- getGEO(accession, GSEMatrix = TRUE)
+      # Try to download with different methods
+      tryCatch({
+        # First try with GSEMatrix=TRUE
+        gset <- getGEO(accession, GSEMatrix = TRUE)
+      }, error = function(e) {
+        message("  First attempt failed, trying without GSEMatrix...")
+        # If that fails, try without GSEMatrix
+        gset <- getGEO(accession, GSEMatrix = FALSE)
+      })
       
       # Handle case where getGEO returns a list
       if (is.list(gset)) {
@@ -248,10 +255,34 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
         gset <- gset[[1]]
       }
       
+      # Verify we got valid data
+      if (is.null(gset) || !inherits(gset, "GEOData")) {
+        stop("Failed to get valid GEO data object")
+      }
+      
       return(gset)
       
     }, error = function(e) {
       if (attempt == max_attempts) {
+        # On final attempt, try to get supplementary files directly
+        message("  All attempts failed, trying to get supplementary files directly...")
+        tryCatch({
+          # Try to get supplementary files
+          sfiles <- getGEOSuppFiles(accession)
+          if (!is.null(sfiles) && nrow(sfiles) > 0) {
+            message("  Successfully retrieved supplementary files")
+            # Create a minimal GEOData object with the supplementary files
+            gset <- new("GEOData")
+            gset@header <- list(
+              geo_accession = accession,
+              supplementary_file = rownames(sfiles)
+            )
+            return(gset)
+          }
+        }, error = function(e2) {
+          message(paste("  Supplementary files retrieval failed:", e2$message))
+        })
+        
         stop(paste("Failed to download after", max_attempts, "attempts:", e$message))
       } else {
         message(paste("Attempt", attempt, "failed:", e$message))
@@ -288,6 +319,26 @@ process_dataset <- function(accession) {
     
     # Get the header information
     header_info <- gsm_data@header
+    
+    # Check if we have supplementary files
+    if (!is.null(header_info$supplementary_file)) {
+      message("  Found supplementary files")
+      message(paste("  Files:", paste(header_info$supplementary_file, collapse="\n    ")))
+      
+      # Create supplementary files directory
+      suppl_dir <- file.path(output_dir, "supplementary_files")
+      dir.create(suppl_dir, recursive = TRUE, showWarnings = FALSE)
+      
+      # Download supplementary files
+      for (file in header_info$supplementary_file) {
+        message(paste("  Downloading:", file))
+        tryCatch({
+          download.file(file, destfile = file.path(suppl_dir, basename(file)), mode = "wb")
+        }, error = function(e) {
+          message(paste("    Failed to download:", file, "-", e$message))
+        })
+      }
+    }
     
     # Check if it's sequencing data
     if (is_sequencing_data(header_info)) {
