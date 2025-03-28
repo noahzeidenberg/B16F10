@@ -241,6 +241,13 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
       
       # Try to download
       gset <- getGEO(accession, GSEMatrix = TRUE)
+      
+      # Handle case where getGEO returns a list
+      if (is.list(gset)) {
+        message("  getGEO returned a list, extracting first element")
+        gset <- gset[[1]]
+      }
+      
       return(gset)
       
     }, error = function(e) {
@@ -279,8 +286,11 @@ process_dataset <- function(accession) {
     output_dir <- file.path("results", accession)
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
     
+    # Get the header information
+    header_info <- gsm_data@header
+    
     # Check if it's sequencing data
-    if (is_sequencing_data(gsm_data@header)) {
+    if (is_sequencing_data(header_info)) {
       message(paste("Dataset", accession, "is sequencing data"))
       # Get SRX accessions
       srx_ids <- get_srx_from_gsm(accession)
@@ -297,7 +307,7 @@ process_dataset <- function(accession) {
           message(paste("Saved", length(srr_ids), "SRR IDs"))
         }
       }
-    } else if (is_microarray_data(gsm_data@header)) {
+    } else if (is_microarray_data(header_info)) {
       message(paste("Dataset", accession, "is microarray data"))
       # Download microarray data
       success <- download_microarray_data(gsm_data, output_dir)
@@ -311,7 +321,7 @@ process_dataset <- function(accession) {
     }
     
     # Save metadata
-    write.csv(as.data.frame(gsm_data@header), 
+    write.csv(as.data.frame(header_info), 
               file.path(output_dir, "metadata.csv"), 
               row.names = TRUE)
     
