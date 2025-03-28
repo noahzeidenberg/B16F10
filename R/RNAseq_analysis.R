@@ -320,9 +320,20 @@ process_dataset <- function(accession) {
           # Download and convert each SRR
           for (srr in srr_ids) {
             message(paste("  Processing SRR:", srr))
+            
+            # Check if SRA toolkit commands are available
+            if (system("which prefetch", ignore.stdout = TRUE, ignore.stderr = TRUE) != 0) {
+              message("  Error: prefetch command not found. Please ensure SRA toolkit is installed and in PATH")
+              next
+            }
+            
+            if (system("which fasterq-dump", ignore.stdout = TRUE, ignore.stderr = TRUE) != 0) {
+              message("  Error: fasterq-dump command not found. Please ensure SRA toolkit is installed and in PATH")
+              next
+            }
+            
             # Use prefetch and fasterq-dump for better performance
-            cmd <- paste("module load sra-toolkit &&",
-                        "prefetch", srr, "&&",           # don't use --type raw
+            cmd <- paste("prefetch", srr, "&&",           # don't use --type raw
                         "fasterq-dump", srr,
                         "--outdir", fastq_dir,
                         "--split-files",
@@ -334,14 +345,21 @@ process_dataset <- function(accession) {
             if (result != 0) {
               message(paste("  Warning: Failed to download/convert", srr, "with exit code", result))
               message("  Trying alternative method...")
+              
+              # Check if fastq-dump is available
+              if (system("which fastq-dump", ignore.stdout = TRUE, ignore.stderr = TRUE) != 0) {
+                message("  Error: fastq-dump command not found. Please ensure SRA toolkit is installed and in PATH")
+                next
+              }
+              
               # Try alternative method using fastq-dump
-              alt_cmd <- paste("module load sra-toolkit &&",
-                              "fastq-dump --split-files --gzip",
+              alt_cmd <- paste("fastq-dump --split-files --gzip",
                               "--outdir", fastq_dir, srr)
               message(paste("  Running alternative command:", alt_cmd))
               alt_result <- system(alt_cmd)
               if (alt_result != 0) {
                 message(paste("  Error: Both download methods failed for", srr))
+                message("  Please ensure SRA toolkit is properly installed and configured")
               }
             } else {
               # Move the SRA file to the SRA directory
