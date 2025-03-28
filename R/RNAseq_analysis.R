@@ -260,7 +260,7 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
               message(paste("  List names:", paste(names(gset), collapse=", ")))
               gset <- gset[[1]]
             }
-            if (inherits(gset, "GEOData")) {
+            if (inherits(gset, "ExpressionSet")) {
               message("  Successfully read cached matrix file")
               return(gset)
             } else {
@@ -279,14 +279,12 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
             message("  First few lines:")
             print(head(raw_data))
             
-            # Create a minimal GEOData object
-            gset <- new("GEOData")
-            gset@header <- list(
-              geo_accession = accession,
-              title = raw_data[grep("!Series_title", raw_data)],
-              type = raw_data[grep("!Series_type", raw_data)],
-              platform_id = raw_data[grep("!Series_platform_id", raw_data)]
-            )
+            # Create a minimal ExpressionSet object
+            gset <- new("ExpressionSet")
+            gset@experimentData <- new("MIAME")
+            gset@experimentData@name <- accession
+            gset@phenoData <- new("AnnotatedDataFrame")
+            gset@phenoData@data <- data.frame(geo_accession = accession)
             return(gset)
           }, error = function(e2) {
             message(paste("  Failed to read raw matrix file:", e2$message))
@@ -318,7 +316,7 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
         stop("getGEO returned NULL")
       }
       
-      if (!inherits(gset, "GEOData")) {
+      if (!inherits(gset, "ExpressionSet")) {
         message(paste("  Object class:", class(gset)))
         message("  Object structure:")
         str(gset)
@@ -337,12 +335,12 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
           sfiles <- getGEOSuppFiles(accession, baseDir = "temp")
           if (!is.null(sfiles) && nrow(sfiles) > 0) {
             message("  Successfully retrieved supplementary files")
-            # Create a minimal GEOData object with the supplementary files
-            gset <- new("GEOData")
-            gset@header <- list(
-              geo_accession = accession,
-              supplementary_file = rownames(sfiles)
-            )
+            # Create a minimal ExpressionSet object with the supplementary files
+            gset <- new("ExpressionSet")
+            gset@experimentData <- new("MIAME")
+            gset@experimentData@name <- accession
+            gset@phenoData <- new("AnnotatedDataFrame")
+            gset@phenoData@data <- data.frame(geo_accession = accession)
             return(gset)
           }
         }, error = function(e2) {
