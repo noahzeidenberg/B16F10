@@ -90,7 +90,7 @@ options(warn = 1)  # Show warnings immediately
 options(timeout = 300)  # Increase timeout to 5 minutes
 
 # Read the GDS table subset
-gds_df <- read.csv("gds_table_subset.csv")
+gds_df <- read.csv("gds_table_new.csv") # from create_gds_table.R
 
 # Function to check if a GSE is RNA-seq
 is_rnaseq <- function(gse_id) {
