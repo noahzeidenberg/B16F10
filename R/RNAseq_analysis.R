@@ -114,10 +114,11 @@ get_srr_from_srx <- function(srx) {
     # Get current API key
     current_key <- Sys.getenv("ENTREZ_KEY")
     
-    # Use esearch and elink with API key properly quoted
-    cmd <- paste("esearch -api_key '", current_key, "' -db sra -query ", srx, 
-                " | elink -api_key '", current_key, "' -target sra", 
-                " | efetch -api_key '", current_key, "' -format docsum", 
+    # Set API key as environment variable for the command
+    cmd <- paste("export NCBI_API_KEY='", current_key, "' && ",
+                "esearch -db sra -query ", srx, 
+                " | elink -target sra", 
+                " | efetch -format docsum", 
                 " | xtract -pattern DocumentSummary -element Run@acc", sep="")
     
     message(paste("  Running command:", cmd))
