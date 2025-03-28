@@ -4,7 +4,7 @@
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
 
-required_packages <- c("GEOquery", "DESeq2", "clusterProfiler", "org.Mm.eg.db", "tidyverse", "dotenv")
+required_packages <- c("GEOquery", "DESeq2", "clusterProfiler", "org.Mm.eg.db", "tidyverse", "dotenv", "SRAdb")
 for (pkg in required_packages) {
   if (!requireNamespace(pkg, quietly = TRUE))
     BiocManager::install(pkg)
@@ -85,27 +85,83 @@ handle_rate_limit <- function(fn, max_retries = 3, initial_delay = 1) {
 # Initialize with first API key
 Sys.setenv(ENTREZ_KEY = get_next_api_key())
 
-# Set options for better error handling
-options(warn = 1)  # Show warnings immediately
-options(timeout = 300)  # Increase timeout to 5 minutes
+# Function to check if data is sequencing data
+is_sequencing_data <- function(metadata) {
+  # Check various metadata fields for sequencing indicators
+  sequencing_indicators <- c(
+    # Check type field
+    any(grepl("sequencing|SRA|RNA-Seq|RNA_SEQ", toupper(metadata$type))),
+    # Check library_strategy field
+    any(grepl("RNA-Seq|RNA_SEQ|RNA|TRANSCRIPTOMIC", toupper(metadata$library_strategy))),
+    # Check library_source field
+    any(grepl("TRANSCRIPTOMIC|RNA", toupper(metadata$library_source))),
+    # Check instrument_model field for sequencers
+    any(grepl("ILLUMINA|NEXTSEQ|HISEQ|NOVASEQ|MISEQ", toupper(metadata$instrument_model)))
+  )
+  
+  return(any(sequencing_indicators))
+}
 
-# Read the GDS table subset
-gds_df <- read.csv("gds_table_new.csv") # from create_gds_table.R
-
-# Function to check if a GSE is RNA-seq
-is_rnaseq <- function(gse_id) {
+# Function to get SRR accessions from an SRX ID
+get_srr_from_srx <- function(srx) {
   tryCatch({
-    gse <- handle_rate_limit(function() {
-      getGEO(gse_id)
+    message(paste("  Getting SRR accessions for", srx))
+    
+    # Use esearch and elink with API key
+    cmd <- paste("esearch -api_key $ENTREZ_KEY -db sra -query", srx, 
+                "| elink -api_key $ENTREZ_KEY -target sra", 
+                "| efetch -api_key $ENTREZ_KEY -format docsum", 
+                "| xtract -pattern DocumentSummary -element Run@acc")
+    
+    message(paste("  Running command:", cmd))
+    
+    # Execute the command with rate limit handling
+    srr_ids <- handle_rate_limit(function() {
+      system(cmd, intern = TRUE)
     })
-    # Check if it's RNA-seq by looking at the technology type and library strategy
-    tech <- unique(unlist(lapply(gse, function(x) x@experimentData@other$type)))
-    lib_strategy <- unique(unlist(lapply(gse, function(x) x@phenoData@data$library_strategy)))
-    return(any(grepl("RNA-seq|RNA sequencing", tech, ignore.case = TRUE)) ||
-           any(grepl("RNA-Seq", lib_strategy, ignore.case = TRUE)))
+    
+    if (length(srr_ids) == 0) {
+      message("  No SRR accessions found")
+      return(NULL)
+    }
+    
+    message(paste("  Found SRR accessions:", paste(srr_ids, collapse=", ")))
+    return(srr_ids)
   }, error = function(e) {
-    message(paste("Error checking RNA-seq status for", gse_id, ":", e$message))
-    return(FALSE)
+    message(paste("Warning: Failed to get SRR info for", srx, ":", e$message))
+    return(NULL)
+  })
+}
+
+# Function to get SRX accessions from a GSM ID
+get_srx_from_gsm <- function(gsm) {
+  tryCatch({
+    message(paste("  Fetching data for", gsm))
+    
+    # Get the GSM data with rate limit handling
+    gsm_data <- handle_rate_limit(function() {
+      getGEO(gsm)
+    })
+    
+    # Extract the 'relation' field
+    relations <- gsm_data@header["relation"][[1]]
+    
+    # Find the SRA link
+    sra_link <- relations[grep("SRA:", relations)]
+    
+    if (length(sra_link) == 0) {
+      message("  No SRA link found")
+      return(NULL)
+    }
+    
+    # Extract the SRA accession number (SRX ID)
+    sra_acc <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+    message(paste("  Found SRA accession:", sra_acc))
+    
+    return(sra_acc)
+  }, error = function(e) {
+    message(paste("Warning: Failed to get SRA info for", gsm, ":", e$message))
+    return(NULL)
   })
 }
 
@@ -114,150 +170,132 @@ process_rnaseq <- function(gse_id) {
   message(paste("Processing", gse_id))
   
   tryCatch({
-    # Download the data with rate limiting
-    gse <- handle_rate_limit(function() {
-      getGEO(gse_id)
-    })
-    
-    # Extract expression matrix and phenotype data
-    expr_matrix <- exprs(gse[[1]])
-    pheno_data <- pData(gse[[1]])
-    
-    # Check if expression matrix is empty or all zeros
-    if (nrow(expr_matrix) == 0 || ncol(expr_matrix) == 0) {
-      message("Expression matrix is empty")
-      return(NULL)
-    }
-    
-    if (all(expr_matrix == 0)) {
-      message("All values in expression matrix are zero")
-      # Try to get supplementary files with counts
-      supp_files <- gse[[1]]@experimentData@other$supplementary_file
-      if (!is.null(supp_files)) {
-        message("Found supplementary files")
-        message(paste("Files:", paste(supp_files, collapse="\n    ")))
-        
-        # Look for count files
-        count_files <- supp_files[grep("counts|Counts|RAW", supp_files)]
-        if (length(count_files) > 0) {
-          message("Found count files")
-          # Download and process count files
-          for (file in count_files) {
-            message(paste("Downloading:", file))
-            tryCatch({
-              download.file(file, destfile = file.path(results_dir, basename(file)), mode = "wb")
-              # If it's a tar file, extract it
-              if (grepl("\\.tar$", file)) {
-                system(paste("tar -xf", file.path(results_dir, basename(file)), "-C", results_dir))
-              }
-            }, error = function(e) {
-              message(paste("Failed to download:", file, "-", e$message))
-            })
-          }
-          return(NULL)  # Skip DESeq2 analysis for now
-        }
-      }
-      return(NULL)
-    }
-    
-    # Get experiment metadata
-    exp_metadata <- gse[[1]]@experimentData
-    
     # Create results directory for this dataset
     results_dir <- file.path("results", gse_id)
     dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
     
-    # Save metadata
-    metadata_list <- list(
-      experiment = list(
-        title = exp_metadata@title,
-        abstract = exp_metadata@abstract,
-        pubMedIds = exp_metadata@pubMedIds,
-        type = exp_metadata@other$type,
-        platform_id = exp_metadata@other$platform_id,
-        overall_design = exp_metadata@other$overall_design
-      ),
-      samples = pheno_data
-    )
+    # Download the data with rate limiting
+    gset <- handle_rate_limit(function() {
+      getGEO(gse_id, GSEMatrix = TRUE)
+    })
     
-    saveRDS(metadata_list, file = file.path(results_dir, paste0(gse_id, "_metadata.rds")))
+    # Save the GEO object
+    saveRDS(gset, file = file.path(results_dir, paste0(gse_id, "_geo_object.rds")))
     
-    # Check for supplementary files with counts
-    supp_files <- exp_metadata@other$supplementary_file
-    if (!is.null(supp_files)) {
-      message("Found supplementary files")
-      message(paste("Files:", paste(supp_files, collapse="\n    ")))
+    # Extract metadata
+    metadata <- pData(gset[[1]])
+    write.csv(metadata, file = file.path(results_dir, paste0(gse_id, "_metadata.csv")))
+    
+    # Get GSM accessions
+    gsm_accessions <- metadata$geo_accession
+    message(paste("\nFound", length(gsm_accessions), "GSM accessions"))
+    
+    # Create samples directory
+    samples_dir <- file.path(results_dir, "samples")
+    dir.create(samples_dir, recursive = TRUE, showWarnings = FALSE)
+    
+    # Get SRX accessions for each GSM
+    srx_info <- c()
+    for (gsm in gsm_accessions) {
+      message(paste("\nProcessing", gsm))
       
-      # Look for count files
-      count_files <- supp_files[grep("counts|Counts|RAW", supp_files)]
-      if (length(count_files) > 0) {
-        message("Found count files")
-        # Download and process count files
-        for (file in count_files) {
-          message(paste("Downloading:", file))
-          tryCatch({
-            download.file(file, destfile = file.path(results_dir, basename(file)), mode = "wb")
-            # If it's a tar file, extract it
-            if (grepl("\\.tar$", file)) {
-              system(paste("tar -xf", file.path(results_dir, basename(file)), "-C", results_dir))
-            }
-          }, error = function(e) {
-            message(paste("Failed to download:", file, "-", e$message))
-          })
+      # Create GSM-specific directory
+      gsm_dir <- file.path(samples_dir, gsm)
+      dir.create(gsm_dir, recursive = TRUE, showWarnings = FALSE)
+      
+      # Get GSM data and save RDS
+      gsm_data <- handle_rate_limit(function() {
+        getGEO(gsm)
+      })
+      saveRDS(gsm_data, file = file.path(gsm_dir, paste0(gsm, ".rds")))
+      
+      # Get SRX accession
+      srx_id <- get_srx_from_gsm(gsm)
+      if (!is.null(srx_id)) {
+        srx_info <- c(srx_info, srx_id)
+      }
+      
+      # Add a small delay between GSM requests
+      Sys.sleep(0.5)
+    }
+    
+    srx_info <- unique(srx_info)
+    
+    if (length(srx_info) == 0) {
+      message("Could not find any SRA run accessions for the GSM IDs")
+      return(NULL)
+    }
+    
+    message(paste("\nFound", length(srx_info), "unique SRA accessions"))
+    
+    # Process each SRX
+    for (srx in srx_info) {
+      message(paste("\nProcessing", srx))
+      
+      # Get SRR accessions for this SRX
+      srr_ids <- get_srr_from_srx(srx)
+      if (is.null(srr_ids)) {
+        message(paste("  Skipping", srx, "as no SRR accessions were found"))
+        next
+      }
+      
+      # Create SRA directory
+      sra_dir <- file.path(results_dir, "SRA")
+      fastq_dir <- file.path(sra_dir, "FASTQ")
+      dir.create(fastq_dir, recursive = TRUE, showWarnings = FALSE)
+      
+      # Download and convert each SRR
+      for (srr in srr_ids) {
+        message(paste("  Processing SRR:", srr))
+        
+        # Use prefetch and fasterq-dump for better performance
+        cmd <- paste("module load sra-toolkit &&",
+                    "prefetch", srr, "&&",
+                    "fasterq-dump", srr,
+                    "--outdir", fastq_dir,
+                    "--split-files",
+                    "--threads 8")
+        
+        message(paste("  Running command:", cmd))
+        
+        # Execute the command and check for errors
+        result <- system(cmd)
+        if (result != 0) {
+          message(paste("  Warning: Failed to download/convert", srr, "with exit code", result))
+          message("  Trying alternative method...")
+          
+          # Try alternative method using fastq-dump
+          alt_cmd <- paste("module load sra-toolkit &&",
+                          "fastq-dump --split-files --gzip",
+                          "--outdir", fastq_dir, srr)
+          message(paste("  Running alternative command:", alt_cmd))
+          alt_result <- system(alt_cmd)
+          if (alt_result != 0) {
+            message(paste("  Error: Both download methods failed for", srr))
+          }
+        } else {
+          # Move the SRA file to the SRA directory
+          sra_file <- file.path(".", paste0(srr, ".sra"))
+          if (file.exists(sra_file)) {
+            file.rename(sra_file, file.path(sra_dir, paste0(srr, ".sra")))
+          }
+          # Compress the FASTQ files
+          message("  Compressing FASTQ files...")
+          system(paste("gzip", file.path(fastq_dir, paste0(srr, "_*.fastq"))))
         }
       }
     }
     
-    # Create DESeq2 object
-    dds <- DESeqDataSetFromMatrix(
-      countData = round(expr_matrix),
-      colData = pheno_data,
-      design = ~ 1  # You'll need to adjust this based on your experimental design
-    )
-    
-    # Run DESeq2
-    dds <- DESeq(dds)
-    
-    # Get results
-    res <- results(dds)
-    
-    # Convert to data frame
-    res_df <- as.data.frame(res)
-    res_df$gene <- rownames(res_df)
-    
-    # Perform KEGG pathway analysis
-    gene_list <- res_df$gene[!is.na(res_df$padj) & res_df$padj < 0.05]
-    
-    if (length(gene_list) > 0) {
-      kegg_result <- enrichKEGG(
-        gene = gene_list,
-        organism = 'mmu',
-        keyType = 'kegg',
-        pvalueCutoff = 0.05
-      )
-      
-      # Save results
-      write.csv(res_df, file = file.path(results_dir, paste0(gse_id, "_DESeq2_results.csv")))
-      write.csv(as.data.frame(kegg_result), file = file.path(results_dir, paste0(gse_id, "_KEGG_results.csv")))
-      
-      # Save expression matrix and phenotype data
-      write.csv(expr_matrix, file = file.path(results_dir, paste0(gse_id, "_expression_matrix.csv")))
-      write.csv(pheno_data, file = file.path(results_dir, paste0(gse_id, "_phenotype_data.csv")))
-      
-      # Save DESeq2 object
-      saveRDS(dds, file = file.path(results_dir, paste0(gse_id, "_DESeq2_object.rds")))
-      
-      message(paste("Successfully processed and saved results for", gse_id))
-    } else {
-      message(paste("No significant genes found for", gse_id))
-    }
-    
-    return(list(deseq_results = res_df, kegg_results = kegg_result))
+    message(paste("\nSuccessfully processed", gse_id))
+    return(TRUE)
   }, error = function(e) {
     message(paste("Error processing", gse_id, ":", e$message))
     return(NULL)
   })
 }
+
+# Read the GDS table subset
+gds_df <- read.csv("gds_table_new.csv")
 
 # Create main results directory if it doesn't exist
 if (!dir.exists("results")) {
@@ -268,12 +306,8 @@ if (!dir.exists("results")) {
 results <- list()
 for (gse_id in gds_df$Accession) {
   tryCatch({
-    if (is_rnaseq(gse_id)) {
-      message(paste("\nProcessing RNA-seq dataset:", gse_id))
-      results[[gse_id]] <- process_rnaseq(gse_id)
-    } else {
-      message(paste("\nSkipping non-RNA-seq dataset:", gse_id))
-    }
+    message(paste("\nProcessing dataset:", gse_id))
+    results[[gse_id]] <- process_rnaseq(gse_id)
   }, error = function(e) {
     message(paste("Error processing", gse_id, ":", e$message))
   })
@@ -282,4 +316,4 @@ for (gse_id in gds_df$Accession) {
 # Save session info
 sink("results/session_info.txt")
 sessionInfo()
-sink() 
+sink()
