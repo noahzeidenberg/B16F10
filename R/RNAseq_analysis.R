@@ -259,8 +259,8 @@ process_dataset <- function(accession) {
   tryCatch({
     message(paste("Processing dataset:", accession))
     
-    # Path to your GDS table subset
-    gds_df <- read.csv("gds_table_new.csv")
+    # Path to your GDS table
+    gds_df <- read.csv("gds_table.csv")
     
     # Get the current row based on the accession number
     row <- which(gds_df$Accession == accession)
