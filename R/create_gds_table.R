@@ -5,14 +5,12 @@ gds_file <- "gds_result (3).txt"
 gds_text <- readLines(gds_file)
 
 # Initialize vectors to store data
-accessions <- c()
-ids <- c()
-types <- c()
-platforms <- c()
-ftp_downloads <- c()
+entries <- list()
 
 # Process each entry
 current_entry <- list()
+entry_number <- 0
+
 for (line in gds_text) {
   # Skip empty lines
   if (line == "") next
@@ -21,14 +19,20 @@ for (line in gds_text) {
   if (grepl("^\\d+\\.", line)) {
     # If we have a previous entry, save it
     if (length(current_entry) > 0) {
-      accessions <- c(accessions, current_entry$accession)
-      ids <- c(ids, current_entry$id)
-      types <- c(types, current_entry$type)
-      platforms <- c(platforms, current_entry$platform)
-      ftp_downloads <- c(ftp_downloads, current_entry$ftp)
+      # Only save if we have all required fields
+      if (!is.null(current_entry$accession) && 
+          !is.null(current_entry$id) && 
+          !is.null(current_entry$type) && 
+          !is.null(current_entry$platform) && 
+          !is.null(current_entry$ftp)) {
+        entries[[length(entries) + 1]] <- current_entry
+      } else {
+        message("Skipping incomplete entry: ", current_entry$accession)
+      }
     }
     # Start new entry
     current_entry <- list()
+    entry_number <- entry_number + 1
     next
   }
   
@@ -46,27 +50,35 @@ for (line in gds_text) {
   }
 }
 
-# Save the last entry if exists
+# Save the last entry if exists and complete
 if (length(current_entry) > 0) {
-  accessions <- c(accessions, current_entry$accession)
-  ids <- c(ids, current_entry$id)
-  types <- c(types, current_entry$type)
-  platforms <- c(platforms, current_entry$platform)
-  ftp_downloads <- c(ftp_downloads, current_entry$ftp)
+  if (!is.null(current_entry$accession) && 
+      !is.null(current_entry$id) && 
+      !is.null(current_entry$type) && 
+      !is.null(current_entry$platform) && 
+      !is.null(current_entry$ftp)) {
+    entries[[length(entries) + 1]] <- current_entry
+  } else {
+    message("Skipping incomplete entry: ", current_entry$accession)
+  }
 }
 
-# Create data frame
-gds_df <- data.frame(
-  Accession = accessions,
-  ID = ids,
-  Type = types,
-  Platform = platforms,
-  FTP_Download = ftp_downloads
-)
+# Create data frame from complete entries
+gds_df <- do.call(rbind, lapply(entries, function(x) {
+  data.frame(
+    Accession = x$accession,
+    ID = x$id,
+    Type = x$type,
+    Platform = x$platform,
+    FTP_Download = x$ftp,
+    stringsAsFactors = FALSE
+  )
+}))
 
 # Save to CSV
 write.csv(gds_df, "gds_table_new.csv", row.names = FALSE)
 
 # Print summary
 message("Created gds_table_new.csv with ", nrow(gds_df), " entries")
-message("Number of RNA-seq datasets: ", sum(grepl("RNA-seq|RNA sequencing", gds_df$Type, ignore.case = TRUE))) 
+message("Number of RNA-seq datasets: ", sum(grepl("RNA-seq|RNA sequencing", gds_df$Type, ignore.case = TRUE)))
+message("Number of microarray datasets: ", sum(grepl("array", gds_df$Type, ignore.case = TRUE))) 
