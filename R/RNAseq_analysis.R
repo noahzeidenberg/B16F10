@@ -251,18 +251,46 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
       if (file.exists(matrix_file)) {
         message("  Found cached matrix file, attempting to read it...")
         tryCatch({
+          # Try to read the matrix file directly
           gset <- getGEO(accession, GSEMatrix = TRUE, destdir = "temp")
           if (!is.null(gset)) {
             if (is.list(gset)) {
+              message("  getGEO returned a list, checking contents...")
+              message(paste("  List length:", length(gset)))
+              message(paste("  List names:", paste(names(gset), collapse=", ")))
               gset <- gset[[1]]
             }
             if (inherits(gset, "GEOData")) {
               message("  Successfully read cached matrix file")
               return(gset)
+            } else {
+              message(paste("  Object class:", class(gset)))
+              message("  Object structure:")
+              str(gset)
             }
           }
         }, error = function(e) {
           message(paste("  Failed to read cached file:", e$message))
+          message("  Attempting to read raw matrix file...")
+          tryCatch({
+            # Try to read the raw matrix file
+            raw_data <- readLines(matrix_file)
+            message(paste("  Matrix file contains", length(raw_data), "lines"))
+            message("  First few lines:")
+            print(head(raw_data))
+            
+            # Create a minimal GEOData object
+            gset <- new("GEOData")
+            gset@header <- list(
+              geo_accession = accession,
+              title = raw_data[grep("!Series_title", raw_data)],
+              type = raw_data[grep("!Series_type", raw_data)],
+              platform_id = raw_data[grep("!Series_platform_id", raw_data)]
+            )
+            return(gset)
+          }, error = function(e2) {
+            message(paste("  Failed to read raw matrix file:", e2$message))
+          })
         })
       }
       
@@ -279,12 +307,21 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
       
       # Handle case where getGEO returns a list
       if (is.list(gset)) {
-        message("  getGEO returned a list, extracting first element")
+        message("  getGEO returned a list, checking contents...")
+        message(paste("  List length:", length(gset)))
+        message(paste("  List names:", paste(names(gset), collapse=", ")))
         gset <- gset[[1]]
       }
       
       # Verify we got valid data
-      if (is.null(gset) || !inherits(gset, "GEOData")) {
+      if (is.null(gset)) {
+        stop("getGEO returned NULL")
+      }
+      
+      if (!inherits(gset, "GEOData")) {
+        message(paste("  Object class:", class(gset)))
+        message("  Object structure:")
+        str(gset)
         stop("Failed to get valid GEO data object")
       }
       
@@ -310,42 +347,6 @@ safe_getGEO <- function(accession, max_attempts = 3, delay = 2) {
           }
         }, error = function(e2) {
           message(paste("  Supplementary files retrieval failed:", e2$message))
-        })
-        
-        # Try one last time with direct FTP access
-        message("  Attempting direct FTP access...")
-        tryCatch({
-          # Extract the series identifier (first 6 characters)
-          series_id <- substr(accession, 1, 6)
-          
-          # Construct the correct FTP URL
-          ftp_url <- paste0("ftp://ftp.ncbi.nlm.nih.gov/geo/series/", series_id, "nnn/", accession, "/")
-          message(paste("  Checking FTP URL:", ftp_url))
-          
-          # Try to get the series matrix file directly
-          matrix_url <- paste0(ftp_url, accession, "_series_matrix.txt.gz")
-          message(paste("  Attempting to download:", matrix_url))
-          
-          # Download the file
-          download.file(matrix_url, 
-                       destfile = matrix_file,
-                       mode = "wb")
-          
-          if (file.exists(matrix_file)) {
-            # Try to read the downloaded file
-            gset <- getGEO(accession, GSEMatrix = TRUE, destdir = "temp")
-            if (!is.null(gset)) {
-              if (is.list(gset)) {
-                gset <- gset[[1]]
-              }
-              if (inherits(gset, "GEOData")) {
-                message("  Successfully retrieved data through direct FTP")
-                return(gset)
-              }
-            }
-          }
-        }, error = function(e3) {
-          message(paste("  Direct FTP access failed:", e3$message))
         })
         
         stop(paste("Failed to download after", max_attempts, "attempts:", e$message))
