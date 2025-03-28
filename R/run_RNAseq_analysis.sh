@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=def-username
+#SBATCH --account=def-lukens
 #SBATCH --job-name=RNAseq_analysis
 #SBATCH --output=RNAseq_output_%A_%a.log
 #SBATCH --error=RNAseq_error_%A_%a.log
@@ -32,7 +32,7 @@ if [ ! -f "$R_SCRIPT" ]; then
 fi
 
 # Run the R script with the current array index
-Rscript "$R_SCRIPT" --accession "${SLURM_ARRAY_TASK_ID}" || {
+Rscript "$R_SCRIPT" "${SLURM_ARRAY_TASK_ID}" || {
     echo "Error: R script failed for array index ${SLURM_ARRAY_TASK_ID}"
     exit 1
 }

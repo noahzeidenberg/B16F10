@@ -326,12 +326,16 @@ process_dataset <- function(accession) {
 
 # Main script logic
 if (!interactive()) {
-  # Get the accession number from command-line argument
-  if (length(commandArgs()) > 1) {
-    accession <- as.character(commandArgs()[2])
-  } else {
+  # Get command line arguments
+  args <- commandArgs(trailingOnly = TRUE)
+  
+  # Check if we have an accession number
+  if (length(args) < 1) {
     stop("No accession number provided")
   }
+  
+  # Get the accession number (first argument)
+  accession <- args[1]
   
   # Call the function to process the dataset
   success <- process_dataset(accession)
