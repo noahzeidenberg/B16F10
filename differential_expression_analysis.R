@@ -479,32 +479,42 @@ process_gse_ids <- function(gse_ids) {
 }
 
 # Main workflow
-main <- function() {
+main <- function(gse_id = NULL) {
+  if (is.null(gse_id)) {
+    stop("Please provide a valid GSE ID. For example: main('GSE223515')")
+  }
+  
   # Create necessary directories
   dir.create("plots", showWarnings = FALSE)
   
   # Prepare data
-  cat("Preparing data...\n")
-  data <- prepare_data()
-  
-  # Perform QC
-  cat("Performing quality control...\n")
-  perform_qc(data$expr_matrix, data$pheno_data)
-  
-  # Perform differential expression analysis
-  cat("Performing differential expression analysis...\n")
-  res <- perform_differential_expression(data$expr_matrix, data$pheno_data)
-  
-  # Create visualizations
-  cat("Creating visualizations...\n")
-  create_visualizations(res)
-  
-  # Perform GSEA
-  cat("Performing gene set enrichment analysis...\n")
-  perform_gsea(res)
-  
-  cat("Analysis complete! Check the plots directory for results.\n")
+  cat(sprintf("Preparing data for %s...\n", gse_id))
+  tryCatch({
+    data <- prepare_data(gse_id = gse_id)
+    
+    # Perform QC
+    cat("Performing quality control...\n")
+    perform_qc(data$expr_matrix, data$pheno_data)
+    
+    # Perform differential expression analysis
+    cat("Performing differential expression analysis...\n")
+    res <- perform_differential_expression(data$expr_matrix, data$pheno_data)
+    
+    # Create visualizations
+    cat("Creating visualizations...\n")
+    create_visualizations(res)
+    
+    # Perform GSEA
+    cat("Performing gene set enrichment analysis...\n")
+    perform_gsea(res)
+    
+    cat("Analysis complete! Check the plots directory for results.\n")
+  }, error = function(e) {
+    cat(sprintf("Error during analysis: %s\n", e$message))
+    cat("Please check if the GSE ID is valid and accessible.\n")
+    cat("You can verify the GSE ID at: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=%s\n", gse_id)
+  })
 }
 
-# Run the pipeline
-main()
+# Example usage:
+# main("GSE223515")  # Replace with your GSE ID
