@@ -404,6 +404,45 @@ perform_gsea <- function(res) {
   ggsave("plots/gsea_plot.pdf", gsea_plot)
 }
 
+# Function to prepare data for differential expression analysis
+prepare_data <- function(gse_id = "GSE223515", reference_index = "mm10") {
+  cat("Starting data preparation...\n")
+  
+  # Get SRX IDs from GSM IDs
+  srx_ids <- get_srx_ids(gse_id)
+  if (is.null(srx_ids)) {
+    stop("Failed to get SRX IDs")
+  }
+  
+  # Convert SRX to SRA IDs
+  sra_ids <- convert_srx_to_sra(srx_ids)
+  if (is.null(sra_ids)) {
+    stop("Failed to convert SRX to SRA IDs")
+  }
+  
+  # Download SRA files
+  cat("Downloading SRA files...\n")
+  download_sra_files(gse_id, sra_ids)
+  
+  # Convert SRA to FASTQ
+  cat("Converting SRA to FASTQ...\n")
+  convert_sra_to_fastq(gse_id, sra_ids)
+  
+  # Align reads
+  cat("Aligning reads...\n")
+  align_reads(gse_id, sra_ids, reference_index)
+  
+  # Quantify genes
+  cat("Quantifying genes...\n")
+  quantify_reads(gse_id, sra_ids, "mm10")
+  
+  # Get expression matrix and sample information
+  cat("Getting expression matrix and sample information...\n")
+  data <- get_expression_matrix(gse_id)
+  
+  return(data)
+}
+
 # Function to process multiple GSE IDs
 process_gse_ids <- function(gse_ids) {
   # Create main directories
