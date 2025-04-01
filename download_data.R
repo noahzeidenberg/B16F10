@@ -17,6 +17,22 @@ for (pkg in required_packages) {
   library(pkg, character.only = TRUE)
 }
 
+# Read API keys from .env file
+env_file <- ".env"
+env_lines <- readLines(env_file)
+api_keys <- env_lines[grep("^NCBI_API_KEY_", env_lines)]
+api_keys <- gsub("'", "", api_keys)
+api_keys <- sapply(api_keys, function(x) strsplit(x, "=")[[1]][2])
+
+# Get array job ID from environment variable
+array_id <- as.numeric(Sys.getenv("SLURM_ARRAY_TASK_ID", "1"))
+
+# Select API key based on array job ID (alternate between keys)
+selected_key <- api_keys[((array_id - 1) %% length(api_keys)) + 1]
+
+# Set the selected API key
+rentrez::set_entrez_key(selected_key)
+
 # Function to create directory structure for a GSE ID
 create_gse_structure <- function(gse_id) {
   # Create main GSE directory
