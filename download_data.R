@@ -187,7 +187,13 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
 # Main workflow
 main <- function(gse_id = NULL) {
   if (is.null(gse_id)) {
-    stop("Please provide a valid GSE ID. For example: main('GSE223515')")
+    # Try to get GSE ID from command line arguments
+    args <- commandArgs(trailingOnly = TRUE)
+    if (length(args) > 0) {
+      gse_id <- args[1]
+    } else {
+      stop("Please provide a valid GSE ID. For example: Rscript download_data.R GSE223515")
+    }
   }
   
   tryCatch({
@@ -221,5 +227,7 @@ main <- function(gse_id = NULL) {
   })
 }
 
-# Example usage:
-# main("GSE223515")  # Replace with your GSE ID 
+# Run the main function if this script is being run directly
+if (sys.nframe() == 0) {
+  main()
+} 
