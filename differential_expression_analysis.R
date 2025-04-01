@@ -215,7 +215,7 @@ download_sra_files <- function(gse_id, sra_ids) {
     gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
     for (gsm_dir in gsm_dirs) {
       sra_dir <- file.path(gsm_dir, "SRA")
-      cmd <- sprintf('wsl prefetch --max-size 500G -O %s -X 100G -f yes -p %s', 
+      cmd <- sprintf('prefetch --max-size 500G -O %s -X 100G -f yes -p %s', 
                      sra_dir, sra_id)
       system(cmd, intern = TRUE)
     }
