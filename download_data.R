@@ -17,21 +17,54 @@ for (pkg in required_packages) {
   library(pkg, character.only = TRUE)
 }
 
-# Read API keys from .env file
-env_file <- ".env"
-env_lines <- readLines(env_file)
-api_keys <- env_lines[grep("^NCBI_API_KEY_", env_lines)]
-api_keys <- gsub("'", "", api_keys)
-api_keys <- sapply(api_keys, function(x) strsplit(x, "=")[[1]][2])
-
-# Get array job ID from environment variable
-array_id <- as.numeric(Sys.getenv("SLURM_ARRAY_TASK_ID", "1"))
-
-# Select API key based on array job ID (alternate between keys)
-selected_key <- api_keys[((array_id - 1) %% length(api_keys)) + 1]
-
-# Set the selected API key
-rentrez::set_entrez_key(selected_key)
+# Read and validate API keys from .env file
+tryCatch({
+  if (!file.exists(".env")) {
+    stop("Cannot find .env file. Please ensure it exists in the current directory.")
+  }
+  
+  env_lines <- readLines(".env")
+  api_keys <- env_lines[grep("^NCBI_API_KEY_", env_lines)]
+  
+  if (length(api_keys) == 0) {
+    stop("No NCBI API keys found in .env file. Keys should start with 'NCBI_API_KEY_'")
+  }
+  
+  # Clean and extract keys
+  api_keys <- gsub("'", "", api_keys)
+  api_keys <- sapply(api_keys, function(x) {
+    key <- strsplit(x, "=")[[1]]
+    if (length(key) != 2) {
+      stop("Invalid API key format in .env file. Expected format: NCBI_API_KEY_X='your-key-here'")
+    }
+    return(trimws(key[2]))
+  })
+  
+  # Validate key format (basic check)
+  invalid_keys <- api_keys == "" | is.na(api_keys) | nchar(api_keys) < 10
+  if (any(invalid_keys)) {
+    stop("Found invalid or empty API keys in positions: ", 
+         paste(which(invalid_keys), collapse = ", "))
+  }
+  
+  # Get array job ID and select key
+  array_id <- as.numeric(Sys.getenv("SLURM_ARRAY_TASK_ID", "1"))
+  selected_key <- api_keys[((array_id - 1) %% length(api_keys)) + 1]
+  
+  # Set the selected API key for both rentrez and GEOquery
+  rentrez::set_entrez_key(selected_key)
+  options(GEOquery.api.key = selected_key)
+  
+  cat(sprintf("Successfully configured API key %d of %d for array job %d\n", 
+              ((array_id - 1) %% length(api_keys)) + 1,
+              length(api_keys),
+              array_id))
+  
+}, error = function(e) {
+  cat("Error setting up API keys:", conditionMessage(e), "\n")
+  cat("Please check your .env file configuration.\n")
+  quit(status = 1)
+})
 
 # Function to create directory structure for a GSE ID
 create_gse_structure <- function(gse_id) {
