@@ -26,8 +26,9 @@ TMP_DIR=$SLURM_TMPDIR/download_${GSE_ID}
 mkdir -p $TMP_DIR
 cd $TMP_DIR
 
-# Copy the R script to the temporary directory
+# Copy the R script and .env file to the temporary directory
 cp $SLURM_SUBMIT_DIR/download_data.R .
+cp $SLURM_SUBMIT_DIR/.env .
 
 # Run the R script
 Rscript download_data.R $GSE_ID
