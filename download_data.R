@@ -176,8 +176,8 @@ get_srx_ids <- function(gse_id) {
 
 # Function to convert SRX IDs to SRA IDs using rentrez
 convert_srx_to_sra <- function(srx_ids) {
-  # Initialize vector to store SRA IDs
-  sra_ids <- character(length(srx_ids))
+  # Initialize list to store SRA IDs (using a list instead of vector to handle multiple SRRs)
+  sra_ids <- list()
   
   # Process each SRX ID
   for (i in seq_along(srx_ids)) {
@@ -185,40 +185,50 @@ convert_srx_to_sra <- function(srx_ids) {
     cat(sprintf("Processing SRX ID %d of %d: %s\n", i, length(srx_ids), srx_id))
     
     tryCatch({
-      # Use rentrez to get SRR ID
+      # Use rentrez to get SRR ID(s)
       xml_result <- rentrez::entrez_fetch(db = "sra", id = srx_id, rettype = "xml")
       xml_doc <- xml2::read_xml(xml_result)
-      srr_id <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
+      srr_ids <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
       
-      if (length(srr_id) > 0 && grepl("^SRR", srr_id)) {
-        sra_ids[i] <- srr_id
-        cat(sprintf("Found SRA ID: %s\n", srr_id))
+      # Filter for valid SRR IDs
+      valid_srr_ids <- srr_ids[grepl("^SRR", srr_ids)]
+      
+      if (length(valid_srr_ids) > 0) {
+        sra_ids[[srx_id]] <- valid_srr_ids
+        cat(sprintf("Found %d SRA ID(s): %s\n", 
+                   length(valid_srr_ids), 
+                   paste(valid_srr_ids, collapse = ", ")))
       } else {
-        cat(sprintf("No valid SRA ID found for SRX ID: %s\n", srx_id))
-        sra_ids[i] <- NA
+        cat(sprintf("No valid SRA IDs found for SRX ID: %s\n", srx_id))
       }
     }, error = function(e) {
       cat(sprintf("Error processing SRX ID %s: %s\n", srx_id, e$message))
-      sra_ids[i] <- NA
     })
     
     # Add a small delay to avoid hitting rate limits
     Sys.sleep(0.5)
   }
   
-  # Remove any NA values
-  sra_ids <- sra_ids[!is.na(sra_ids)]
+  # Flatten the list of SRA IDs
+  all_sra_ids <- unlist(sra_ids)
   
-  if (length(sra_ids) == 0) {
+  if (length(all_sra_ids) == 0) {
     stop("No SRA IDs found for any of the SRX IDs")
   }
   
-  return(sra_ids)
+  return(all_sra_ids)
 }
 
 # Function to download SRA files using prefetch
 download_sra_files <- function(gse_id, sra_ids) {
   gse_dir <- create_gse_structure(gse_id)
+  
+  # Check available space before downloading
+  available_space <- check_disk_space(getwd())
+  if (!is.na(available_space) && available_space < 50) {  # Require at least 50GB free
+    stop(sprintf("Insufficient disk space. Only %.1fGB available. Need at least 50GB.", 
+                 available_space))
+  }
   
   # Download SRA files for each sample
   for (sra_id in sra_ids) {
@@ -226,9 +236,27 @@ download_sra_files <- function(gse_id, sra_ids) {
     gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
     for (gsm_dir in gsm_dirs) {
       sra_dir <- file.path(gsm_dir, "SRA")
+      
+      # Check space again before each download
+      available_space <- check_disk_space(getwd())
+      if (!is.na(available_space) && available_space < 20) {  # Require at least 20GB free for each file
+        stop(sprintf("Insufficient disk space for downloading %s. Only %.1fGB available.", 
+                     sra_id, available_space))
+      }
+      
       cmd <- sprintf('prefetch --max-size 100G -O %s -p %s', 
                      sra_dir, sra_id)
-      system(cmd, intern = TRUE)
+      result <- tryCatch({
+        system(cmd, intern = TRUE)
+      }, error = function(e) {
+        warning(sprintf("Error downloading %s: %s", sra_id, e$message))
+        return(NULL)
+      })
+      
+      # Check if download was successful
+      if (!is.null(result) && length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
+        warning(sprintf("Error downloading %s: %s", sra_id, paste(result, collapse="\n")))
+      }
     }
   }
 }
