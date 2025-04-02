@@ -76,8 +76,8 @@ check_disk_space <- function(path) {
       df <- as.numeric(gsub("[^0-9.]", "", df))
       return(df)
     } else {
-      # Linux specific command
-      df <- system(sprintf('df -h %s | awk \'NR==2 {print $4}\' | sed \'s/[A-Za-z]//g\'', path))
+      # Linux specific command - use df -B1G to get size in GB
+      df <- system(sprintf('df -B1G %s | awk \'NR==2 {print $4}\'', path), intern = TRUE)
       df <- as.numeric(df)
       return(df)
     }
@@ -89,8 +89,8 @@ check_disk_space <- function(path) {
 
 # Function to create directory structure for a GSE ID
 create_gse_structure <- function(gse_id) {
-  # Create main GSE directory
-  gse_dir <- file.path(".", gse_id)
+  # Create main GSE directory in the temporary directory
+  gse_dir <- file.path(Sys.getenv("SLURM_TMPDIR"), gse_id)
   dir.create(gse_dir, showWarnings = FALSE, recursive = TRUE)
   
   # Create subdirectories
@@ -223,10 +223,11 @@ convert_srx_to_sra <- function(srx_ids) {
 download_sra_files <- function(gse_id, sra_ids) {
   gse_dir <- create_gse_structure(gse_id)
   
-  # Check available space before downloading
-  available_space <- check_disk_space(getwd())
+  # Check available space in the temporary directory
+  tmp_dir <- Sys.getenv("SLURM_TMPDIR")
+  available_space <- check_disk_space(tmp_dir)
   if (!is.na(available_space) && available_space < 50) {  # Require at least 50GB free
-    stop(sprintf("Insufficient disk space. Only %.1fGB available. Need at least 50GB.", 
+    stop(sprintf("Insufficient disk space in temporary directory. Only %.1fGB available. Need at least 50GB.", 
                  available_space))
   }
   
@@ -238,7 +239,7 @@ download_sra_files <- function(gse_id, sra_ids) {
       sra_dir <- file.path(gsm_dir, "SRA")
       
       # Check space again before each download
-      available_space <- check_disk_space(getwd())
+      available_space <- check_disk_space(tmp_dir)
       if (!is.na(available_space) && available_space < 20) {  # Require at least 20GB free for each file
         stop(sprintf("Insufficient disk space for downloading %s. Only %.1fGB available.", 
                      sra_id, available_space))
