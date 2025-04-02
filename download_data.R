@@ -221,7 +221,8 @@ convert_srx_to_sra <- function(srx_ids) {
 
 # Function to download SRA files using prefetch
 download_sra_files <- function(gse_id, sra_ids) {
-  gse_dir <- create_gse_structure(gse_id)
+  # Use the existing GSE directory structure
+  gse_dir <- file.path(Sys.getenv("SLURM_TMPDIR"), gse_id)
   
   # Check available space in the temporary directory
   tmp_dir <- Sys.getenv("SLURM_TMPDIR")
@@ -264,7 +265,8 @@ download_sra_files <- function(gse_id, sra_ids) {
 
 # Function to convert SRA to FASTQ
 convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
-  gse_dir <- create_gse_structure(gse_id)
+  # Use the existing GSE directory structure
+  gse_dir <- file.path(Sys.getenv("SLURM_TMPDIR"), gse_id)
   
   # Convert SRA to FASTQ for each sample
   for (sra_id in sra_ids) {
