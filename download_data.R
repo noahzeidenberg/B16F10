@@ -66,6 +66,27 @@ tryCatch({
   quit(status = 1)
 })
 
+# Function to check available disk space (in GB)
+check_disk_space <- function(path) {
+  tryCatch({
+    if (.Platform$OS.type == "windows") {
+      # Windows specific command
+      df <- system(sprintf('wmic logicaldisk where "DeviceID=%s" get size', path))
+      df <- strsplit(df, "\n")[[1]][2]
+      df <- as.numeric(gsub("[^0-9.]", "", df))
+      return(df)
+    } else {
+      # Linux specific command
+      df <- system(sprintf('df -h %s | awk \'NR==2 {print $4}\' | sed \'s/[A-Za-z]//g\'', path))
+      df <- as.numeric(df)
+      return(df)
+    }
+  }, error = function(e) {
+    cat("Error checking disk space:", conditionMessage(e), "\n")
+    return(NA)
+  })
+}
+
 # Function to create directory structure for a GSE ID
 create_gse_structure <- function(gse_id) {
   # Create main GSE directory

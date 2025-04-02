@@ -4,11 +4,12 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --job-name=download_rnaseq
 #SBATCH --output=download_rnaseq_%A_%a.out
 #SBATCH --error=download_rnaseq_%A_%a.err
-#SBATCH --array=1-72 
+#SBATCH --array=1-72
+#SBATCH --tmp=100G
 
 # Load required modules
 module load sra-toolkit
