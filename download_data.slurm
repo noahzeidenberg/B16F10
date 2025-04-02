@@ -15,6 +15,7 @@
 module load sra-toolkit
 module load r
 module load gcc
+module load pigz
 
 # Set up environment
 source ~/scratch/B16F10/.venv/bin/activate
@@ -34,11 +35,26 @@ cp $SLURM_SUBMIT_DIR/.env .
 # Run the R script
 Rscript download_data.R $GSE_ID
 
-# Copy results back to the submission directory
-RESULTS_DIR=$SLURM_SUBMIT_DIR/results/${GSE_ID}
-mkdir -p $RESULTS_DIR
-cp -r * $RESULTS_DIR/
+# Create the proper directory structure in the permanent location
+GSE_DIR=$SLURM_SUBMIT_DIR/${GSE_ID}
+mkdir -p $GSE_DIR/samples
 
-# Clean up
+# Copy files to their correct locations
+if [ -d "samples" ]; then
+    for gsm_dir in samples/*; do
+        if [ -d "$gsm_dir" ]; then
+            gsm_id=$(basename "$gsm_dir")
+            mkdir -p "$GSE_DIR/samples/$gsm_id"
+            cp -r "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/"
+        fi
+    done
+fi
+
+# Copy any other files from the GSE directory
+if [ -d "$GSE_ID" ]; then
+    cp -r "$GSE_ID"/* "$GSE_DIR/"
+fi
+
+# Clean up only after successful copying
 cd $SLURM_SUBMIT_DIR
 rm -rf $TMP_DIR 

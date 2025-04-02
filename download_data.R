@@ -275,9 +275,17 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
       fastq_dir <- file.path(gsm_dir, "SRA", "FASTQ")
       
       if (file.exists(sra_file)) {
+        # Convert to FASTQ
         cmd <- sprintf('fasterq-dump --split-files --progress --threads %d --outdir %s %s',
-                       threads, fastq_dir, sra_id)
+                      threads, fastq_dir, sra_id)
         system(cmd, intern = TRUE)
+        
+        # Compress the FASTQ files
+        fastq_files <- list.files(fastq_dir, pattern = "\\.fastq$", full.names = TRUE)
+        for (fastq_file in fastq_files) {
+          cmd <- sprintf("pigz -p %d %s", threads, fastq_file)
+          system(cmd)
+        }
       }
     }
   }
