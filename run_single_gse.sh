@@ -32,14 +32,21 @@ source ~/scratch/B16F10/.venv/bin/activate
 # Create logs directory if it doesn't exist
 mkdir -p logs/download_rnaseq
 
-# Create a temporary directory for this job
-TMP_DIR=$SLURM_TMPDIR/download_${GSE_ID}
-mkdir -p $TMP_DIR
-cd $TMP_DIR
+# Check if we should use temporary directory
+if [ "$USE_TMPDIR" = "0" ]; then
+    echo "Using permanent directory for downloads"
+    cd $SLURM_SUBMIT_DIR
+else
+    echo "Using temporary directory for downloads"
+    # Create a temporary directory for this job
+    TMP_DIR=$SLURM_TMPDIR/download_${GSE_ID}
+    mkdir -p $TMP_DIR
+    cd $TMP_DIR
 
-# Copy the R script and .env file to the temporary directory
-cp $SLURM_SUBMIT_DIR/download_data.R .
-cp $SLURM_SUBMIT_DIR/.env .
+    # Copy the R script and .env file to the temporary directory
+    cp $SLURM_SUBMIT_DIR/download_data.R .
+    cp $SLURM_SUBMIT_DIR/.env .
+fi
 
 # Load required modules again in case they were unloaded in temporary directory
 module load sra-toolkit
@@ -48,6 +55,11 @@ module load gcc
 
 # Function to copy files from temporary to permanent storage
 copy_files() {
+    if [ "$USE_TMPDIR" = "0" ]; then
+        echo "Using permanent directory, no need to copy files"
+        return 0
+    fi
+
     echo "Copying files from temporary to permanent storage..."
     local TMP_GSE_DIR=$(find $TMP_DIR -type d -name "$GSE_ID" | head -n 1)
     local GSE_DIR=$SLURM_SUBMIT_DIR/${GSE_ID}
@@ -125,14 +137,16 @@ trap 'echo "Received signal, copying files..."; copy_files; exit 1' SIGTERM SIGI
 # Run the R script
 Rscript download_data.R $GSE_ID
 
-# Copy files to permanent storage
-if ! copy_files; then
-    echo "Error: Failed to copy files to permanent storage"
-    exit 1
-fi
+# Copy files to permanent storage if using temporary directory
+if [ "$USE_TMPDIR" = "1" ]; then
+    if ! copy_files; then
+        echo "Error: Failed to copy files to permanent storage"
+        exit 1
+    fi
 
-# Clean up only after successful copying
-cd $SLURM_SUBMIT_DIR
-rm -rf $TMP_DIR
+    # Clean up only after successful copying
+    cd $SLURM_SUBMIT_DIR
+    rm -rf $TMP_DIR
+fi
 
 echo "Download and conversion complete for $GSE_ID"

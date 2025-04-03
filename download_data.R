@@ -121,7 +121,14 @@ get_base_dir <- function() {
   # Check if we're running in SLURM
   if (Sys.getenv("SLURM_TMPDIR") != "") {
     cat("Running in SLURM environment\n")
-    return(Sys.getenv("SLURM_TMPDIR"))
+    # Check if we should use temporary directory
+    if (Sys.getenv("USE_TMPDIR", "1") == "1") {
+      cat("Using temporary directory for downloads\n")
+      return(Sys.getenv("SLURM_TMPDIR"))
+    } else {
+      cat("Using permanent directory for downloads\n")
+      return(Sys.getenv("SLURM_SUBMIT_DIR"))
+    }
   }
   
   # When running manually, always use current directory
@@ -509,6 +516,11 @@ download_sra_files <- function(gse_id, sra_ids) {
                 
                 # Check if download was successful
                 sra_file <- file.path(sra_dir, paste0(sra_id, ".sra"))
+                
+                # Check the cache directory
+                cache_dir <- file.path(Sys.getenv("HOME"), "ncbi", "public", "sra")
+                cache_file <- file.path(cache_dir, paste0(sra_id, ".sra"))
+                
                 if (file.exists(sra_file)) {
                   file_size <- file.info(sra_file)$size
                   if (file_size > 0) {
@@ -519,17 +531,40 @@ download_sra_files <- function(gse_id, sra_ids) {
                     cat(sprintf("SRA file exists but is empty: %s\n", sra_file))
                     retry_count <- retry_count + 1
                   }
-                } else {
-                  # Check if the file exists in the cache directory
-                  cache_file <- file.path(Sys.getenv("HOME"), "ncbi", "public", "sra", paste0(sra_id, ".sra"))
-                  if (file.exists(cache_file)) {
-                    cat(sprintf("Found SRA file in cache: %s\n", cache_file))
-                    # Try to copy from cache
-                    if (file.copy(cache_file, sra_file)) {
-                      cat(sprintf("Copied SRA file from cache to: %s\n", sra_file))
+                } else if (file.exists(cache_file)) {
+                  cat(sprintf("Found SRA file in cache: %s\n", cache_file))
+                  # Try to copy from cache
+                  if (file.copy(cache_file, sra_file)) {
+                    file_size <- file.info(sra_file)$size
+                    if (file_size > 0) {
+                      cat(sprintf("Copied SRA file from cache to: %s (size: %.2f MB)\n", 
+                                 sra_file, file_size/1024/1024))
                       success <- TRUE
                     } else {
-                      cat(sprintf("Failed to copy SRA file from cache\n"))
+                      cat(sprintf("Copied file is empty: %s\n", sra_file))
+                      retry_count <- retry_count + 1
+                    }
+                  } else {
+                    cat(sprintf("Failed to copy SRA file from cache\n"))
+                    retry_count <- retry_count + 1
+                  }
+                } else {
+                  # Try to find the file in the current directory
+                  current_file <- file.path(getwd(), paste0(sra_id, ".sra"))
+                  if (file.exists(current_file)) {
+                    cat(sprintf("Found SRA file in current directory: %s\n", current_file))
+                    if (file.copy(current_file, sra_file)) {
+                      file_size <- file.info(sra_file)$size
+                      if (file_size > 0) {
+                        cat(sprintf("Copied SRA file from current directory to: %s (size: %.2f MB)\n", 
+                                   sra_file, file_size/1024/1024))
+                        success <- TRUE
+                      } else {
+                        cat(sprintf("Copied file is empty: %s\n", sra_file))
+                        retry_count <- retry_count + 1
+                      }
+                    } else {
+                      cat(sprintf("Failed to copy SRA file from current directory\n"))
                       retry_count <- retry_count + 1
                     }
                   } else {
