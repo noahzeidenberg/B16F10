@@ -499,18 +499,43 @@ download_sra_files <- function(gse_id, sra_ids) {
                   Sys.sleep(delay_time)
                 }
                 
-                # Download with prefetch
-                cmd <- sprintf('prefetch --max-size 100G -O %s %s', sra_dir, sra_id)
+                # Download with prefetch and capture both stdout and stderr
+                cmd <- sprintf('prefetch --max-size 100G -O %s %s 2>&1', sra_dir, sra_id)
                 result <- system(cmd, intern = TRUE)
+                
+                # Log the full output of prefetch
+                cat("prefetch output:\n")
+                cat(paste(result, collapse = "\n"), "\n")
                 
                 # Check if download was successful
                 sra_file <- file.path(sra_dir, paste0(sra_id, ".sra"))
                 if (file.exists(sra_file)) {
-                  cat(sprintf("Successfully downloaded SRA file: %s\n", sra_file))
-                  success <- TRUE
+                  file_size <- file.info(sra_file)$size
+                  if (file_size > 0) {
+                    cat(sprintf("Successfully downloaded SRA file: %s (size: %.2f MB)\n", 
+                               sra_file, file_size/1024/1024))
+                    success <- TRUE
+                  } else {
+                    cat(sprintf("SRA file exists but is empty: %s\n", sra_file))
+                    retry_count <- retry_count + 1
+                  }
                 } else {
-                  cat(sprintf("SRA file not found after download: %s\n", sra_file))
-                  retry_count <- retry_count + 1
+                  # Check if the file exists in the cache directory
+                  cache_file <- file.path(Sys.getenv("HOME"), "ncbi", "public", "sra", paste0(sra_id, ".sra"))
+                  if (file.exists(cache_file)) {
+                    cat(sprintf("Found SRA file in cache: %s\n", cache_file))
+                    # Try to copy from cache
+                    if (file.copy(cache_file, sra_file)) {
+                      cat(sprintf("Copied SRA file from cache to: %s\n", sra_file))
+                      success <- TRUE
+                    } else {
+                      cat(sprintf("Failed to copy SRA file from cache\n"))
+                      retry_count <- retry_count + 1
+                    }
+                  } else {
+                    cat(sprintf("SRA file not found after download: %s\n", sra_file))
+                    retry_count <- retry_count + 1
+                  }
                 }
               }, error = function(e) {
                 cat(sprintf("Error downloading %s (attempt %d): %s\n", 
