@@ -3,8 +3,7 @@
 
 # Load required modules
 tryCatch({
-  # Source the module initialization script
-  system("source /etc/profile.d/modules.sh", intern = TRUE)
+  # Module initialization is handled by the shell environment
   
   # Load SRA toolkit
   system("module load sratoolkit", intern = TRUE)
