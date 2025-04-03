@@ -87,10 +87,21 @@ check_disk_space <- function(path) {
   })
 }
 
+# Function to determine the appropriate base directory
+get_base_dir <- function() {
+  # Check if we're running in SLURM
+  if (Sys.getenv("SLURM_TMPDIR") != "") {
+    return(Sys.getenv("SLURM_TMPDIR"))
+  }
+  # If not in SLURM, use current working directory
+  return(getwd())
+}
+
 # Function to create directory structure for a GSE ID
 create_gse_structure <- function(gse_id) {
-  # Create main GSE directory in the current directory
-  gse_dir <- file.path(getwd(), gse_id)
+  # Create main GSE directory in the appropriate directory
+  base_dir <- get_base_dir()
+  gse_dir <- file.path(base_dir, gse_id)
   
   # Create directory with error checking
   if (!dir.create(gse_dir, showWarnings = FALSE, recursive = TRUE)) {
@@ -253,13 +264,13 @@ convert_srx_to_sra <- function(srx_ids) {
 # Function to download SRA files using prefetch
 download_sra_files <- function(gse_id, sra_ids) {
   # Use the existing GSE directory structure
-  gse_dir <- file.path(Sys.getenv("SLURM_TMPDIR"), gse_id)
+  base_dir <- get_base_dir()
+  gse_dir <- file.path(base_dir, gse_id)
   
-  # Check available space in the temporary directory
-  tmp_dir <- Sys.getenv("SLURM_TMPDIR")
-  available_space <- check_disk_space(tmp_dir)
+  # Check available space in the directory
+  available_space <- check_disk_space(base_dir)
   if (!is.na(available_space) && available_space < 50) {  # Require at least 50GB free
-    stop(sprintf("Insufficient disk space in temporary directory. Only %.1fGB available. Need at least 50GB.", 
+    stop(sprintf("Insufficient disk space in directory. Only %.1fGB available. Need at least 50GB.", 
                  available_space))
   }
   
@@ -271,7 +282,7 @@ download_sra_files <- function(gse_id, sra_ids) {
       sra_dir <- file.path(gsm_dir, "SRA")
       
       # Check space again before each download
-      available_space <- check_disk_space(tmp_dir)
+      available_space <- check_disk_space(base_dir)
       if (!is.na(available_space) && available_space < 20) {  # Require at least 20GB free for each file
         stop(sprintf("Insufficient disk space for downloading %s. Only %.1fGB available.", 
                      sra_id, available_space))
@@ -297,7 +308,8 @@ download_sra_files <- function(gse_id, sra_ids) {
 # Function to convert SRA to FASTQ
 convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
   # Use the existing GSE directory structure
-  gse_dir <- file.path(Sys.getenv("SLURM_TMPDIR"), gse_id)
+  base_dir <- get_base_dir()
+  gse_dir <- file.path(base_dir, gse_id)
   
   # Convert SRA to FASTQ for each sample
   for (sra_id in sra_ids) {
