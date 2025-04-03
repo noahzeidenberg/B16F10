@@ -91,7 +91,7 @@ copy_files() {
     fi
     
     # Create the proper directory structure in the permanent location
-    GSE_DIR=$SUBMIT_DIR/results/${GSE_ID}
+    GSE_DIR=$SUBMIT_DIR/${GSE_ID}/results
     echo "Creating GSE_DIR: $GSE_DIR"
     if ! mkdir -p $GSE_DIR/{fastqc,trimmed,alignment,counts}; then
         echo "Error: Failed to create GSE_DIR"
@@ -122,7 +122,7 @@ trap 'echo "Received signal, copying files..."; copy_files; exit 1' SIGTERM SIGI
 # Copy the FASTQ files from the previous step
 if [ "$USE_TMPDIR" = "1" ]; then
     echo "Copying input files to temporary directory"
-    if ! cp -r $SUBMIT_DIR/results/${GSE_ID}/* .; then
+    if ! cp -r $SUBMIT_DIR/${GSE_ID}/results/* .; then
         echo "Error: Failed to copy input files to temporary directory"
         exit 1
     fi
