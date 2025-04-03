@@ -344,7 +344,11 @@ get_srx_ids <- function(gse_id) {
           relations <- Meta(gsm)$relation
           sra_link <- relations[grep("SRA:", relations)]
           if (length(sra_link) > 0) {
+            # Extract SRX ID from the SRA link
             srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+            # Clean up the SRX ID
+            srx_id <- gsub("\\[.*\\]", "", srx_id)  # Remove any brackets and their contents
+            srx_id <- trimws(srx_id)  # Remove any whitespace
             cat(sprintf("Found SRX ID: %s\n", srx_id))
             return(srx_id)
           }
@@ -411,8 +415,26 @@ convert_srx_to_sra <- function(srx_ids) {
           Sys.sleep(delay_time)
         }
         
-        # Use rate-limited API request
-        xml_result <- make_api_request(rentrez::entrez_fetch, db = "sra", id = srx_id, rettype = "xml")
+        # First, try to get the SRA ID directly using the SRX ID
+        xml_result <- make_api_request(rentrez::entrez_search, 
+                                     db = "sra", 
+                                     term = paste0(srx_id, "[Accession]"),
+                                     retmax = 1)
+        
+        if (length(xml_result$ids) > 0) {
+          # If we found an ID, use it to fetch the details
+          xml_result <- make_api_request(rentrez::entrez_fetch, 
+                                       db = "sra", 
+                                       id = xml_result$ids[1], 
+                                       rettype = "xml")
+        } else {
+          # If direct search failed, try the old method
+          xml_result <- make_api_request(rentrez::entrez_fetch, 
+                                       db = "sra", 
+                                       id = srx_id, 
+                                       rettype = "xml")
+        }
+        
         xml_doc <- xml2::read_xml(xml_result)
         srr_ids <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
         
