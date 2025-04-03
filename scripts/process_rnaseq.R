@@ -171,6 +171,56 @@ normalize_counts <- function(counts, batch_info, output_file) {
   return(results)
 }
 
+# Function to check if output files exist
+check_output_files <- function(gse_id) {
+  base_dir <- file.path(getwd(), gse_id, "results")
+  
+  # Check for normalized counts file (final output)
+  if (file.exists(file.path(base_dir, "counts", "normalized_counts.rds"))) {
+    cat("Found normalized counts file, skipping processing\n")
+    return(TRUE)
+  }
+  
+  # Check for feature counts file
+  if (file.exists(file.path(base_dir, "counts", "feature_counts.rds"))) {
+    cat("Found feature counts file, skipping processing\n")
+    return(TRUE)
+  }
+  
+  # Check for alignment files
+  alignment_dir <- file.path(base_dir, "alignment")
+  if (dir.exists(alignment_dir)) {
+    bam_files <- list.files(alignment_dir, pattern = "Aligned.sortedByCoord.out.bam$", full.names = TRUE)
+    if (length(bam_files) > 0) {
+      cat("Found alignment files, skipping processing\n")
+      return(TRUE)
+    }
+  }
+  
+  # Check for trimmed files
+  trimmed_dir <- file.path(base_dir, "trimmed")
+  if (dir.exists(trimmed_dir)) {
+    trimmed_files <- list.files(trimmed_dir, pattern = "\\.trimmed\\.fastq\\.gz$", full.names = TRUE)
+    if (length(trimmed_files) > 0) {
+      cat("Found trimmed files, skipping processing\n")
+      return(TRUE)
+    }
+  }
+  
+  # Check for FastQC results
+  fastqc_dir <- file.path(base_dir, "fastqc")
+  if (dir.exists(fastqc_dir)) {
+    fastqc_files <- list.files(fastqc_dir, pattern = "\\.html$", full.names = TRUE)
+    if (length(fastqc_files) > 0) {
+      cat("Found FastQC results, skipping processing\n")
+      return(TRUE)
+    }
+  }
+  
+  cat("No existing output files found, proceeding with processing\n")
+  return(FALSE)
+}
+
 # Main workflow
 main <- function(gse_id = NULL) {
   if (is.null(gse_id)) {
@@ -183,6 +233,11 @@ main <- function(gse_id = NULL) {
   }
   
   cat(sprintf("Processing GSE ID: %s\n", gse_id))
+  
+  # Check for existing output files
+  if (check_output_files(gse_id)) {
+    return(0)
+  }
   
   # Set up directories
   base_dir <- file.path(getwd(), gse_id, "results")

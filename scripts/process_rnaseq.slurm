@@ -118,8 +118,62 @@ copy_files() {
     return 0
 }
 
+# Function to check if output files exist
+check_output_files() {
+    echo "=== Checking for existing output files ==="
+    GSE_DIR=$SUBMIT_DIR/${GSE_ID}/results
+    
+    # Check for normalized counts file (final output)
+    if [ -f "$GSE_DIR/counts/normalized_counts.rds" ]; then
+        echo "Found normalized counts file, skipping processing"
+        return 0
+    fi
+    
+    # Check for feature counts file
+    if [ -f "$GSE_DIR/counts/feature_counts.rds" ]; then
+        echo "Found feature counts file, skipping processing"
+        return 0
+    }
+    
+    # Check for alignment files
+    if [ -d "$GSE_DIR/alignment" ]; then
+        bam_files=$(find "$GSE_DIR/alignment" -name "*Aligned.sortedByCoord.out.bam" | wc -l)
+        if [ "$bam_files" -gt 0 ]; then
+            echo "Found alignment files, skipping processing"
+            return 0
+        fi
+    }
+    
+    # Check for trimmed files
+    if [ -d "$GSE_DIR/trimmed" ]; then
+        trimmed_files=$(find "$GSE_DIR/trimmed" -name "*.trimmed.fastq.gz" | wc -l)
+        if [ "$trimmed_files" -gt 0 ]; then
+            echo "Found trimmed files, skipping processing"
+            return 0
+        fi
+    }
+    
+    # Check for FastQC results
+    if [ -d "$GSE_DIR/fastqc" ]; then
+        fastqc_files=$(find "$GSE_DIR/fastqc" -name "*.html" | wc -l)
+        if [ "$fastqc_files" -gt 0 ]; then
+            echo "Found FastQC results, skipping processing"
+            return 0
+        fi
+    }
+    
+    echo "No existing output files found, proceeding with processing"
+    return 1
+}
+
 # Set up trap to handle signals
 trap 'echo "Received signal, copying files..."; copy_files; exit 1' SIGTERM SIGINT SIGUSR1
+
+# Check for existing output files
+if check_output_files; then
+    echo "Output files already exist for $GSE_ID. Skipping processing."
+    exit 0
+fi
 
 # Copy the FASTQ files from the previous step
 if [ "$USE_TMPDIR" = "1" ]; then
