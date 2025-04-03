@@ -189,8 +189,41 @@ copy_files() {
     return 0
 }
 
+# Function to check if FASTQ files exist
+check_fastq_files() {
+    echo "=== Checking for existing FASTQ files ==="
+    GSE_DIR=$SUBMIT_DIR/${GSE_ID}
+    
+    if [ ! -d "$GSE_DIR/samples" ]; then
+        echo "No samples directory found, proceeding with download"
+        return 1
+    fi
+    
+    for gsm_dir in "$GSE_DIR/samples"/*; do
+        if [ -d "$gsm_dir" ]; then
+            fastq_dir="$gsm_dir/SRA/FASTQ"
+            if [ -d "$fastq_dir" ]; then
+                fastq_files=$(find "$fastq_dir" -name "*.fastq.gz" | wc -l)
+                if [ "$fastq_files" -gt 0 ]; then
+                    echo "Found existing FASTQ files in $fastq_dir"
+                    return 0
+                fi
+            fi
+        fi
+    done
+    
+    echo "No existing FASTQ files found, proceeding with download"
+    return 1
+}
+
 # Set up trap to handle signals
 trap 'echo "Received signal, copying files..."; copy_files; exit 1' SIGTERM SIGINT SIGUSR1
+
+# Check for existing FASTQ files
+if check_fastq_files; then
+    echo "FASTQ files already exist for $GSE_ID. Skipping download and conversion."
+    exit 0
+fi
 
 # Run the R script
 echo "=== Starting R script execution ==="

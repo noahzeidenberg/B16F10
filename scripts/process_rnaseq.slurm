@@ -5,11 +5,13 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16  # 16 threads for fastp
 #SBATCH --mem=64G
-#SBATCH --job-name=process_rnaseq
-#SBATCH --output=logs/process_rnaseq/process_rnaseq_%A_%a.out
-#SBATCH --error=logs/process_rnaseq/process_rnaseq_%A_%a.err
-#SBATCH --array=1-72
+#SBATCH --job-name=process_rnaseq_test
+#SBATCH --output=logs/process_rnaseq/process_rnaseq_test_%j.out
+#SBATCH --error=logs/process_rnaseq/process_rnaseq_test_%j.err
 #SBATCH --tmp=200
+
+# Set to run in working directory instead of temporary directory
+export USE_TMPDIR=0
 
 # Enable debugging
 set -x
@@ -24,8 +26,8 @@ module load gcc
 # Set up environment
 source ~/scratch/B16F10/.venv/bin/activate
 
-# Get the GSE ID for this array job
-GSE_ID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" rna_seq_gse_ids.txt)
+# Set the GSE ID for testing
+GSE_ID="GSE254073"  # Replace with your test GSE ID
 
 # Get absolute paths
 SUBMIT_DIR=$(realpath $SLURM_SUBMIT_DIR)

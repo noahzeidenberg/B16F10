@@ -570,6 +570,34 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
   }
 }
 
+# Function to check if FASTQ files exist for a GSE ID
+check_fastq_files <- function(gse_id) {
+  base_dir <- get_base_dir()
+  gse_dir <- file.path(base_dir, gse_id)
+  
+  if (!dir.exists(gse_dir)) {
+    return(FALSE)
+  }
+  
+  sample_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
+  if (length(sample_dirs) == 0) {
+    return(FALSE)
+  }
+  
+  for (sample_dir in sample_dirs) {
+    fastq_dir <- file.path(sample_dir, "SRA", "FASTQ")
+    if (dir.exists(fastq_dir)) {
+      fastq_files <- list.files(fastq_dir, pattern = "\\.fastq\\.gz$", full.names = TRUE)
+      if (length(fastq_files) > 0) {
+        cat(sprintf("Found existing FASTQ files in %s\n", fastq_dir))
+        return(TRUE)
+      }
+    }
+  }
+  
+  return(FALSE)
+}
+
 # Main workflow
 main <- function(gse_id = NULL) {
   if (is.null(gse_id)) {
@@ -584,6 +612,12 @@ main <- function(gse_id = NULL) {
   tryCatch({
     base_dir <- get_base_dir()
     cat(sprintf("Using base directory: %s\n", base_dir))
+    
+    # Check if FASTQ files already exist
+    if (check_fastq_files(gse_id)) {
+      cat(sprintf("FASTQ files already exist for %s. Skipping download and conversion.\n", gse_id))
+      return(0)
+    }
     
     # Get SRX IDs
     cat(sprintf("Getting SRX IDs for %s...\n", gse_id))
