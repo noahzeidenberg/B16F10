@@ -72,7 +72,14 @@ copy_files() {
     # Create the proper directory structure in the permanent location
     mkdir -p $GSE_DIR/samples
     
-    # Copy sample directories
+    # First copy the GSE directory contents (excluding samples)
+    echo "Copying GSE directory contents..."
+    if ! cp -rv "$TMP_GSE_DIR"/* "$GSE_DIR/" 2>&1; then
+        echo "Error copying GSE directory contents"
+        return 1
+    fi
+    
+    # Then copy sample directories
     if [ -d "$TMP_GSE_DIR/samples" ]; then
         echo "Copying sample directories..."
         for gsm_dir in "$TMP_GSE_DIR/samples"/*; do
@@ -96,13 +103,6 @@ copy_files() {
         done
     else
         echo "Samples directory not found in $TMP_GSE_DIR"
-        return 1
-    fi
-    
-    # Copy any other files from the GSE directory
-    echo "Copying GSE directory contents..."
-    if ! cp -rv "$TMP_GSE_DIR"/* "$GSE_DIR/" 2>&1; then
-        echo "Error copying GSE directory contents"
         return 1
     fi
     
