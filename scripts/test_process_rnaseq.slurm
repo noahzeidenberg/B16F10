@@ -37,8 +37,8 @@ echo "=== End Debug Information ==="
 
 # Create output directories
 echo "Creating output directories..."
-GSE_DIR=$SUBMIT_DIR/results/${GSE_ID}
-mkdir -p $GSE_DIR/{fastqc,trimmed,alignment,counts}
+GSE_DIR=$SUBMIT_DIR/${GSE_ID}
+mkdir -p $GSE_DIR/results/{fastqc,trimmed,alignment,counts}
 
 # Run the R script
 echo "=== Starting R script execution ==="
