@@ -61,12 +61,17 @@ copy_files() {
     fi
 
     echo "Copying files from temporary to permanent storage..."
+    echo "Temporary directory: $TMP_DIR"
+    echo "Permanent directory: $SLURM_SUBMIT_DIR"
+    
     # Find all GSE directories in the temporary location
     local TMP_GSE_DIRS=$(find $TMP_DIR -type d -name "$GSE_ID")
     local GSE_DIR=$SLURM_SUBMIT_DIR/${GSE_ID}
     
     if [ -z "$TMP_GSE_DIRS" ]; then
         echo "Error: Could not find GSE directory in temporary location"
+        echo "Contents of temporary directory:"
+        ls -la $TMP_DIR
         return 1
     fi
     
@@ -76,19 +81,31 @@ copy_files() {
     # Process each GSE directory found
     for TMP_GSE_DIR in $TMP_GSE_DIRS; do
         echo "Processing GSE directory: $TMP_GSE_DIR"
+        echo "Contents of temporary GSE directory:"
+        ls -la $TMP_GSE_DIR
         
         # Copy sample directories
         if [ -d "$TMP_GSE_DIR/samples" ]; then
             echo "Copying sample directories from $TMP_GSE_DIR/samples..."
+            echo "Contents of samples directory:"
+            ls -la "$TMP_GSE_DIR/samples"
+            
             for gsm_dir in "$TMP_GSE_DIR/samples"/*; do
                 if [ -d "$gsm_dir" ]; then
                     gsm_id=$(basename "$gsm_dir")
                     echo "Copying $gsm_id to $GSE_DIR/samples/$gsm_id"
+                    echo "Contents of source directory:"
+                    ls -la "$gsm_dir"
+                    
+                    # Create destination directory
                     mkdir -p "$GSE_DIR/samples/$gsm_id"
                     
                     # Copy with verbose output and error checking
+                    echo "Starting copy operation..."
                     if ! cp -rv "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/" 2>&1; then
                         echo "Warning: Error copying $gsm_id directory, continuing with next sample"
+                        echo "Contents of destination directory after failed copy:"
+                        ls -la "$GSE_DIR/samples/$gsm_id"
                         continue
                     fi
                     
@@ -99,6 +116,9 @@ copy_files() {
                     fi
                     
                     # Verify contents were copied
+                    echo "Contents of destination directory after copy:"
+                    ls -la "$GSE_DIR/samples/$gsm_id"
+                    
                     if [ ! "$(ls -A "$GSE_DIR/samples/$gsm_id")" ]; then
                         echo "Warning: $gsm_id directory is empty after copy, continuing with next sample"
                         continue
@@ -112,8 +132,13 @@ copy_files() {
         
         # Copy any other files from the GSE directory
         echo "Copying GSE directory contents from $TMP_GSE_DIR..."
+        echo "Contents to be copied:"
+        ls -la "$TMP_GSE_DIR"/*
+        
         if ! cp -rv "$TMP_GSE_DIR"/* "$GSE_DIR/" 2>&1; then
             echo "Warning: Error copying GSE directory contents from $TMP_GSE_DIR, continuing with next GSE directory"
+            echo "Contents of destination after failed copy:"
+            ls -la "$GSE_DIR"
             continue
         fi
     done
@@ -133,6 +158,10 @@ copy_files() {
                 if [ -d "$gsm_dir/SRA" ]; then
                     echo "Contents of $gsm_id/SRA:"
                     ls -la "$gsm_dir/SRA"
+                    if [ -d "$gsm_dir/SRA/FASTQ" ]; then
+                        echo "Contents of $gsm_id/SRA/FASTQ:"
+                        ls -la "$gsm_dir/SRA/FASTQ"
+                    fi
                 fi
             fi
         done
