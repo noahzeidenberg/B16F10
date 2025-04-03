@@ -669,7 +669,7 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
     # Find the corresponding GSM directory
     gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
     for (gsm_dir in gsm_dirs) {
-      sra_file <- file.path(gsm_dir, "SRA", paste0(sra_id, ".sra"))
+      sra_file <- file.path(gsm_dir, "SRA", sra_id, paste0(sra_id, ".sra"))
       fastq_dir <- file.path(gsm_dir, "SRA", "FASTQ")
       
       if (file.exists(sra_file)) {
@@ -680,8 +680,8 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
           dir.create(fastq_dir, recursive = TRUE)
         }
         
-        # Convert to FASTQ
-        cmd <- sprintf('fasterq-dump --split-files --progress --threads %d --outdir %s %s',
+        # Convert to FASTQ with detailed error handling
+        cmd <- sprintf('fasterq-dump --split-files --progress --threads %d --outdir %s %s 2>&1',
                       threads, fastq_dir, sra_id)
         result <- tryCatch({
           system(cmd, intern = TRUE)
@@ -689,6 +689,12 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
           warning(sprintf("Error converting %s: %s", sra_id, e$message))
           return(NULL)
         })
+        
+        # Log the full output of fasterq-dump
+        if (!is.null(result)) {
+          cat("fasterq-dump output:\n")
+          cat(paste(result, collapse = "\n"), "\n")
+        }
         
         # Check if conversion was successful
         if (!is.null(result)) {
@@ -699,6 +705,12 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
             fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
             if (length(fastq_files) == 0) {
               warning(sprintf("No FASTQ files found after conversion for %s", sra_id))
+              # Try to get more information about the failure
+              cmd <- sprintf('fasterq-dump --split-files --progress --threads %d --outdir %s %s --verbose 2>&1',
+                            threads, fastq_dir, sra_id)
+              verbose_result <- system(cmd, intern = TRUE)
+              cat("Verbose fasterq-dump output:\n")
+              cat(paste(verbose_result, collapse = "\n"), "\n")
             } else {
               cat(sprintf("Successfully created FASTQ files: %s\n", 
                          paste(basename(fastq_files), collapse = ", ")))
@@ -712,6 +724,8 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
             }
           }
         }
+      } else {
+        warning(sprintf("SRA file not found: %s", sra_file))
       }
     }
   }
