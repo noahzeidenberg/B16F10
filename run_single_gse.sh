@@ -46,60 +46,79 @@ module load sra-toolkit
 module load r
 module load gcc
 
+# Function to copy files from temporary to permanent storage
+copy_files() {
+    echo "Copying files from temporary to permanent storage..."
+    local TMP_GSE_DIR=$(find $TMP_DIR -type d -name "$GSE_ID" | head -n 1)
+    local GSE_DIR=$SLURM_SUBMIT_DIR/${GSE_ID}
+    
+    if [ -z "$TMP_GSE_DIR" ]; then
+        echo "Error: Could not find GSE directory in temporary location"
+        return 1
+    fi
+    
+    # Create the proper directory structure in the permanent location
+    mkdir -p $GSE_DIR/samples
+    
+    # Copy sample directories
+    if [ -d "$TMP_GSE_DIR/samples" ]; then
+        echo "Copying sample directories..."
+        for gsm_dir in "$TMP_GSE_DIR/samples"/*; do
+            if [ -d "$gsm_dir" ]; then
+                gsm_id=$(basename "$gsm_dir")
+                echo "Copying $gsm_id to $GSE_DIR/samples/$gsm_id"
+                mkdir -p "$GSE_DIR/samples/$gsm_id"
+                cp -rv "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/"
+            fi
+        done
+    else
+        echo "Samples directory not found in $TMP_GSE_DIR"
+        return 1
+    fi
+    
+    # Copy any other files from the GSE directory
+    echo "Copying GSE directory contents..."
+    cp -rv "$TMP_GSE_DIR"/* "$GSE_DIR/"
+    
+    # Verify the copy was successful
+    echo "Verifying files in permanent location:"
+    if [ -d "$GSE_DIR/samples" ]; then
+        echo "Contents of $GSE_DIR/samples:"
+        ls -la "$GSE_DIR/samples"
+        
+        # Check each sample directory
+        for gsm_dir in "$GSE_DIR/samples"/*; do
+            if [ -d "$gsm_dir" ]; then
+                echo "Contents of $(basename "$gsm_dir"):"
+                ls -la "$gsm_dir"
+                if [ -d "$gsm_dir/SRA" ]; then
+                    echo "Contents of $(basename "$gsm_dir")/SRA:"
+                    ls -la "$gsm_dir/SRA"
+                fi
+            fi
+        done
+    else
+        echo "Samples directory not found in permanent location"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Set up trap to handle signals
+trap 'echo "Received signal, copying files..."; copy_files; exit 1' SIGTERM SIGINT SIGUSR1
+
 # Run the R script
 Rscript download_data.R $GSE_ID
 
-# Create the proper directory structure in the permanent location
-GSE_DIR=$SLURM_SUBMIT_DIR/${GSE_ID}
-mkdir -p $GSE_DIR/samples
-
-# Debug information
-echo "Current directory: $(pwd)"
-echo "Temporary directory: $TMP_DIR"
-echo "GSE directory: $GSE_DIR"
-echo "Contents of current directory:"
-ls -la
-echo "Contents of samples directory (if it exists):"
-if [ -d "samples" ]; then
-    ls -la samples
-else
-    echo "Samples directory not found in current directory"
-fi
-
-# Copy files to their correct locations
-if [ -d "samples" ]; then
-    echo "Copying sample directories..."
-    for gsm_dir in samples/*; do
-        if [ -d "$gsm_dir" ]; then
-            gsm_id=$(basename "$gsm_dir")
-            echo "Copying $gsm_id to $GSE_DIR/samples/$gsm_id"
-            mkdir -p "$GSE_DIR/samples/$gsm_id"
-            cp -rv "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/"
-        fi
-    done
-else
-    echo "Samples directory not found in $TMP_DIR"
-fi
-
-# Copy any other files from the GSE directory
-if [ -d "$GSE_ID" ]; then
-    echo "Copying GSE directory contents..."
-    cp -rv "$GSE_ID"/* "$GSE_DIR/"
-else
-    echo "GSE directory not found in $TMP_DIR"
-fi
-
-# Verify the copy was successful
-echo "Verifying files in permanent location:"
-if [ -d "$GSE_DIR/samples" ]; then
-    echo "Contents of $GSE_DIR/samples:"
-    ls -la "$GSE_DIR/samples"
-else
-    echo "Samples directory not found in permanent location"
+# Copy files to permanent storage
+if ! copy_files; then
+    echo "Error: Failed to copy files to permanent storage"
+    exit 1
 fi
 
 # Clean up only after successful copying
 cd $SLURM_SUBMIT_DIR
 rm -rf $TMP_DIR
 
-echo "Download and conversion complete for $GSE_ID" 
+echo "Download and conversion complete for $GSE_ID"

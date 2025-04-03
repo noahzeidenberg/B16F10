@@ -15,7 +15,6 @@
 module load sra-toolkit
 module load r
 module load gcc
-module load pigz
 
 # Set up environment
 source ~/scratch/B16F10/.venv/bin/activate
