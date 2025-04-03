@@ -515,11 +515,13 @@ download_sra_files <- function(gse_id, sra_ids) {
                 cat(paste(result, collapse = "\n"), "\n")
                 
                 # Check if download was successful
-                sra_file <- file.path(sra_dir, paste0(sra_id, ".sra"))
+                sra_subdir <- file.path(sra_dir, sra_id)
+                sra_file <- file.path(sra_subdir, paste0(sra_id, ".sra"))
                 
                 # Check the cache directory
                 cache_dir <- file.path(Sys.getenv("HOME"), "ncbi", "public", "sra")
-                cache_file <- file.path(cache_dir, paste0(sra_id, ".sra"))
+                cache_subdir <- file.path(cache_dir, sra_id)
+                cache_file <- file.path(cache_subdir, paste0(sra_id, ".sra"))
                 
                 if (file.exists(sra_file)) {
                   file_size <- file.info(sra_file)$size
@@ -533,6 +535,10 @@ download_sra_files <- function(gse_id, sra_ids) {
                   }
                 } else if (file.exists(cache_file)) {
                   cat(sprintf("Found SRA file in cache: %s\n", cache_file))
+                  # Create the subdirectory if it doesn't exist
+                  if (!dir.exists(sra_subdir)) {
+                    dir.create(sra_subdir, recursive = TRUE)
+                  }
                   # Try to copy from cache
                   if (file.copy(cache_file, sra_file)) {
                     file_size <- file.info(sra_file)$size
@@ -550,9 +556,14 @@ download_sra_files <- function(gse_id, sra_ids) {
                   }
                 } else {
                   # Try to find the file in the current directory
-                  current_file <- file.path(getwd(), paste0(sra_id, ".sra"))
+                  current_subdir <- file.path(getwd(), sra_id)
+                  current_file <- file.path(current_subdir, paste0(sra_id, ".sra"))
                   if (file.exists(current_file)) {
                     cat(sprintf("Found SRA file in current directory: %s\n", current_file))
+                    # Create the subdirectory if it doesn't exist
+                    if (!dir.exists(sra_subdir)) {
+                      dir.create(sra_subdir, recursive = TRUE)
+                    }
                     if (file.copy(current_file, sra_file)) {
                       file_size <- file.info(sra_file)$size
                       if (file_size > 0) {
