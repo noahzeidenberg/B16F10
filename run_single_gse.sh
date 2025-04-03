@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=06:00:00
+#SBATCH --time=00:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=16G
 #SBATCH --job-name=download_single_gse
 #SBATCH --output=logs/download_rnaseq/download_single_gse_%j.out
 #SBATCH --error=logs/download_rnaseq/download_single_gse_%j.err
