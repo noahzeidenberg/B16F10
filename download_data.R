@@ -182,6 +182,48 @@ create_sample_structure <- function(gse_dir, gsm_id) {
   return(sample_dir)
 }
 
+# Add rate limiting mechanism
+last_request_time <- Sys.time()
+request_count <- 0
+MAX_REQUESTS_PER_SECOND <- 10
+
+# Function to enforce rate limiting
+enforce_rate_limit <- function() {
+  current_time <- Sys.time()
+  elapsed <- as.numeric(difftime(current_time, last_request_time, units = "secs"))
+  
+  if (elapsed < 1) {
+    if (request_count >= MAX_REQUESTS_PER_SECOND) {
+      # Wait until the next second
+      Sys.sleep(1 - elapsed)
+      request_count <<- 0
+      last_request_time <<- Sys.time()
+    }
+  } else {
+    request_count <<- 0
+    last_request_time <<- current_time
+  }
+  
+  request_count <<- request_count + 1
+}
+
+# Function to make API request with rate limiting
+make_api_request <- function(fn, ...) {
+  enforce_rate_limit()
+  tryCatch({
+    result <- fn(...)
+    return(result)
+  }, error = function(e) {
+    if (grepl("HTTP 429|HTTP 403|Failed to perform HTTP request", e$message)) {
+      # Rate limit hit, wait and retry
+      Sys.sleep(1)
+      enforce_rate_limit()
+      return(fn(...))
+    }
+    stop(e)
+  })
+}
+
 # Function to get SRX IDs from GSM IDs and save GSM objects
 get_srx_ids <- function(gse_id) {
   gse_dir <- create_gse_structure(gse_id)
@@ -204,8 +246,8 @@ get_srx_ids <- function(gse_id) {
         Sys.sleep(delay_time)
       }
       
-      # Try to get the GEO object
-      gse <- getGEO(gse_id, GSEMatrix = FALSE)
+      # Try to get the GEO object with rate limiting
+      gse <- make_api_request(getGEO, gse_id, GSEMatrix = FALSE)
       success <- TRUE
       
       # Check if this is HTS data
@@ -268,65 +310,51 @@ get_srx_ids <- function(gse_id) {
     }, error = function(e) {
       retry_count <- retry_count + 1
       
-      # Check if it's an HTTP 403 error
-      if (grepl("HTTP 403", e$message)) {
-        cat(sprintf("HTTP 403 Forbidden error (attempt %d of %d). This may be due to rate limiting.\n", 
+      if (grepl("HTTP 429|HTTP 403|Failed to perform HTTP request", e$message)) {
+        cat(sprintf("Rate limit hit (attempt %d of %d). Waiting before retry...\n", 
                    retry_count, max_retries))
-        
-        # If we've tried all retries, return NULL to skip this GSE
-        if (retry_count >= max_retries) {
-          cat("Maximum retries reached. Skipping this GSE ID.\n")
-          return(NULL)
-        }
+        Sys.sleep(10 * retry_count)  # Exponential backoff
       } else {
-        # For other errors, just report them
         cat(sprintf("Error fetching GEO data (attempt %d of %d): %s\n", 
                    retry_count, max_retries, e$message))
-        
-        # If we've tried all retries, return NULL to skip this GSE
-        if (retry_count >= max_retries) {
-          cat("Maximum retries reached. Skipping this GSE ID.\n")
-          return(NULL)
-        }
+      }
+      
+      if (retry_count >= max_retries) {
+        cat("Maximum retries reached. Skipping this GSE ID.\n")
+        return(NULL)
       }
     })
   }
   
-  # If we get here, we've exhausted all retries
   return(NULL)
 }
 
 # Function to convert SRX IDs to SRA IDs using rentrez
 convert_srx_to_sra <- function(srx_ids) {
-  # Initialize list to store SRA IDs (using a list instead of vector to handle multiple SRRs)
   sra_ids <- list()
   
-  # Process each SRX ID
   for (i in seq_along(srx_ids)) {
     srx_id <- srx_ids[i]
     cat(sprintf("Processing SRX ID %d of %d: %s\n", i, length(srx_ids), srx_id))
     
-    # Add retry logic for rentrez API calls
     max_retries <- 3
     retry_count <- 0
     success <- FALSE
     
     while (!success && retry_count < max_retries) {
       tryCatch({
-        # Add a delay before each attempt to avoid rate limiting
         if (retry_count > 0) {
-          delay_time <- 5 * retry_count  # Increase delay with each retry
+          delay_time <- 5 * retry_count
           cat(sprintf("Retry %d: Waiting %d seconds before trying again...\n", 
                      retry_count, delay_time))
           Sys.sleep(delay_time)
         }
         
-        # Use rentrez to get SRR ID(s)
-        xml_result <- rentrez::entrez_fetch(db = "sra", id = srx_id, rettype = "xml")
+        # Use rate-limited API request
+        xml_result <- make_api_request(rentrez::entrez_fetch, db = "sra", id = srx_id, rettype = "xml")
         xml_doc <- xml2::read_xml(xml_result)
         srr_ids <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
         
-        # Filter for valid SRR IDs
         valid_srr_ids <- srr_ids[grepl("^SRR", srr_ids)]
         
         if (length(valid_srr_ids) > 0) {
@@ -337,40 +365,31 @@ convert_srx_to_sra <- function(srx_ids) {
           success <- TRUE
         } else {
           cat(sprintf("No valid SRA IDs found for SRX ID: %s\n", srx_id))
-          success <- TRUE  # Still mark as success to avoid retries
+          success <- TRUE
         }
       }, error = function(e) {
         retry_count <- retry_count + 1
         
-        # Check if it's an HTTP 403 error
-        if (grepl("HTTP 403", e$message)) {
-          cat(sprintf("HTTP 403 Forbidden error (attempt %d of %d). This may be due to rate limiting.\n", 
+        if (grepl("HTTP 429|HTTP 403|Failed to perform HTTP request", e$message)) {
+          cat(sprintf("Rate limit hit (attempt %d of %d). Waiting before retry...\n", 
                      retry_count, max_retries))
-          
-          # If we've tried all retries, skip this SRX ID
-          if (retry_count >= max_retries) {
-            cat("Maximum retries reached. Skipping this SRX ID.\n")
-            success <- TRUE  # Mark as success to avoid further retries
-          }
+          Sys.sleep(10 * retry_count)
         } else {
-          # For other errors, just report them
           cat(sprintf("Error processing SRX ID %s (attempt %d of %d): %s\n", 
                      srx_id, retry_count, max_retries, e$message))
-          
-          # If we've tried all retries, skip this SRX ID
-          if (retry_count >= max_retries) {
-            cat("Maximum retries reached. Skipping this SRX ID.\n")
-            success <- TRUE  # Mark as success to avoid further retries
-          }
+        }
+        
+        if (retry_count >= max_retries) {
+          cat("Maximum retries reached. Skipping this SRX ID.\n")
+          success <- TRUE
         }
       })
     }
     
-    # Add a small delay between SRX IDs to avoid hitting rate limits
+    # Add a small delay between SRX IDs
     Sys.sleep(1)
   }
   
-  # Flatten the list of SRA IDs
   all_sra_ids <- unlist(sra_ids)
   
   if (length(all_sra_ids) == 0) {
