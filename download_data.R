@@ -442,6 +442,51 @@ main <- function(gse_id = NULL) {
     cat("Converting SRA to FASTQ...\n")
     convert_sra_to_fastq(gse_id, sra_ids)
     
+    # Verify files were created
+    cat("Verifying files were created...\n")
+    gse_dir <- file.path(base_dir, gse_id)
+    if (dir.exists(gse_dir)) {
+      cat(sprintf("GSE directory exists: %s\n", gse_dir))
+      cat("Contents of GSE directory:\n")
+      system(sprintf("ls -la %s", gse_dir))
+      
+      samples_dir <- file.path(gse_dir, "samples")
+      if (dir.exists(samples_dir)) {
+        cat(sprintf("Samples directory exists: %s\n", samples_dir))
+        cat("Contents of samples directory:\n")
+        system(sprintf("ls -la %s", samples_dir))
+        
+        # Check each sample directory
+        sample_dirs <- list.dirs(samples_dir, recursive = FALSE)
+        for (sample_dir in sample_dirs) {
+          cat(sprintf("Contents of sample directory %s:\n", sample_dir))
+          system(sprintf("ls -la %s", sample_dir))
+          
+          # Check SRA directory
+          sra_dir <- file.path(sample_dir, "SRA")
+          if (dir.exists(sra_dir)) {
+            cat(sprintf("Contents of SRA directory %s:\n", sra_dir))
+            system(sprintf("ls -la %s", sra_dir))
+            
+            # Check FASTQ directory
+            fastq_dir <- file.path(sra_dir, "FASTQ")
+            if (dir.exists(fastq_dir)) {
+              cat(sprintf("Contents of FASTQ directory %s:\n", fastq_dir))
+              system(sprintf("ls -la %s", fastq_dir))
+            } else {
+              cat(sprintf("FASTQ directory does not exist: %s\n", fastq_dir))
+            }
+          } else {
+            cat(sprintf("SRA directory does not exist: %s\n", sra_dir))
+          }
+        }
+      } else {
+        cat(sprintf("Samples directory does not exist: %s\n", samples_dir))
+      }
+    } else {
+      cat(sprintf("GSE directory does not exist: %s\n", gse_dir))
+    }
+    
     cat("Download and conversion complete!\n")
   }, error = function(e) {
     cat(sprintf("Error during download process: %s\n", e$message))

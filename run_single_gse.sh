@@ -48,20 +48,49 @@ Rscript download_data.R $GSE_ID
 GSE_DIR=$SLURM_SUBMIT_DIR/${GSE_ID}
 mkdir -p $GSE_DIR/samples
 
+# Debug information
+echo "Current directory: $(pwd)"
+echo "Temporary directory: $TMP_DIR"
+echo "GSE directory: $GSE_DIR"
+echo "Contents of current directory:"
+ls -la
+echo "Contents of samples directory (if it exists):"
+if [ -d "samples" ]; then
+    ls -la samples
+else
+    echo "Samples directory not found in current directory"
+fi
+
 # Copy files to their correct locations
 if [ -d "samples" ]; then
+    echo "Copying sample directories..."
     for gsm_dir in samples/*; do
         if [ -d "$gsm_dir" ]; then
             gsm_id=$(basename "$gsm_dir")
+            echo "Copying $gsm_id to $GSE_DIR/samples/$gsm_id"
             mkdir -p "$GSE_DIR/samples/$gsm_id"
-            cp -r "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/"
+            cp -rv "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/"
         fi
     done
+else
+    echo "Samples directory not found in $TMP_DIR"
 fi
 
 # Copy any other files from the GSE directory
 if [ -d "$GSE_ID" ]; then
-    cp -r "$GSE_ID"/* "$GSE_DIR/"
+    echo "Copying GSE directory contents..."
+    cp -rv "$GSE_ID"/* "$GSE_DIR/"
+else
+    echo "GSE directory not found in $TMP_DIR"
+fi
+
+# Verify the copy was successful
+echo "Verifying files in permanent location:"
+if [ -d "$GSE_DIR/samples" ]; then
+    echo "Contents of $GSE_DIR/samples:"
+    ls -la "$GSE_DIR/samples"
+else
+    echo "Samples directory not found in permanent location"
 fi
 
 # Clean up only after successful copying
