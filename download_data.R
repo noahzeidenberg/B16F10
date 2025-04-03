@@ -93,46 +93,24 @@ tryCatch({
 
 # Function to check available disk space (in GB)
 check_disk_space <- function(path) {
-  tryCatch({
-    if (.Platform$OS.type == "windows") {
-      # Windows specific command
-      df <- system(sprintf('wmic logicaldisk where "DeviceID=%s" get size', path))
-      df <- strsplit(df, "\n")[[1]][2]
-      df <- as.numeric(gsub("[^0-9.]", "", df))
-      return(df)
-    } else {
-      # Linux specific command - use df -B1G to get size in GB
-      df <- system(sprintf('df -B1G %s | awk \'NR==2 {print $4}\'', path), intern = TRUE)
-      df <- as.numeric(df)
-      return(df)
-    }
-  }, error = function(e) {
-    cat("Error checking disk space:", conditionMessage(e), "\n")
-    return(NA)
-  })
+  if (.Platform$OS.type == "windows") {
+    df <- system(sprintf('wmic logicaldisk where "DeviceID=%s" get size', path), intern = TRUE)
+    df <- strsplit(df, "\n")[[1]][2]
+    return(as.numeric(gsub("[^0-9.]", "", df)))
+  } else {
+    df <- system(sprintf('df -B1G %s | awk \'NR==2 {print $4}\'', path), intern = TRUE)
+    return(as.numeric(df))
+  }
 }
 
 # Function to determine the appropriate base directory
 get_base_dir <- function() {
-  # Get current directory
   current_dir <- getwd()
-  cat(sprintf("Current working directory: %s\n", current_dir))
-  
-  # Check if we're running in SLURM
   if (Sys.getenv("SLURM_TMPDIR") != "") {
-    cat("Running in SLURM environment\n")
-    # Check if we should use temporary directory
-    if (Sys.getenv("USE_TMPDIR", "1") == "1") {
-      cat("Using temporary directory for downloads\n")
-      return(Sys.getenv("SLURM_TMPDIR"))
-    } else {
-      cat("Using permanent directory for downloads\n")
-      return(Sys.getenv("SLURM_SUBMIT_DIR"))
-    }
+    return(ifelse(Sys.getenv("USE_TMPDIR", "1") == "1", 
+                 Sys.getenv("SLURM_TMPDIR"), 
+                 Sys.getenv("SLURM_SUBMIT_DIR")))
   }
-  
-  # When running manually, always use current directory
-  cat("Running manually, using current directory\n")
   return(current_dir)
 }
 
@@ -485,40 +463,26 @@ convert_srx_to_sra <- function(srx_ids) {
 
 # Function to download SRA files using prefetch
 download_sra_files <- function(gse_id, sra_ids) {
-  # Check if prefetch is available
   if (!check_command("prefetch")) {
     stop("prefetch command not found. Please ensure SRA toolkit is installed and in PATH")
   }
   
-  # Use the existing GSE directory structure
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
   
-  # Check available space in the directory
+  # Check available space
   available_space <- check_disk_space(base_dir)
-  if (!is.na(available_space) && available_space < 50) {  # Require at least 50GB free
-    stop(sprintf("Insufficient disk space in directory. Only %.1fGB available. Need at least 50GB.", 
-                 available_space))
+  if (!is.na(available_space) && available_space < 50) {
+    stop(sprintf("Insufficient disk space. Only %.1fGB available. Need at least 50GB.", available_space))
   }
-  
-  # Create a mapping of SRA IDs to GSM directories
-  gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
-  gsm_ids <- basename(gsm_dirs)
   
   # Download SRA files for each sample
   for (sra_id in sra_ids) {
-    # Find the corresponding GSM directory by checking which GSM has this SRA ID
-    for (i in seq_along(gsm_dirs)) {
-      gsm_dir <- gsm_dirs[i]
-      gsm_id <- gsm_ids[i]
+    gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
+    for (gsm_dir in gsm_dirs) {
+      gsm_id <- basename(gsm_dir)
       sra_dir <- file.path(gsm_dir, "SRA")
-      
-      # Check space again before each download
-      available_space <- check_disk_space(base_dir)
-      if (!is.na(available_space) && available_space < 20) {  # Require at least 20GB free for each file
-        stop(sprintf("Insufficient disk space for downloading %s. Only %.1fGB available.", 
-                     sra_id, available_space))
-      }
+      sra_file <- file.path(sra_dir, sra_id, paste0(sra_id, ".sra"))
       
       # Check if this SRA ID belongs to this GSM
       gsm_rds <- file.path(gsm_dir, paste0(gsm_id, ".rds"))
@@ -528,124 +492,26 @@ download_sra_files <- function(gse_id, sra_ids) {
         sra_link <- relations[grep("SRA:", relations)]
         if (length(sra_link) > 0) {
           srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
-          # Check if this SRX ID maps to the current SRA ID
           xml_result <- make_api_request(rentrez::entrez_fetch, db = "sra", id = srx_id, rettype = "xml")
           xml_doc <- xml2::read_xml(xml_result)
           srr_ids <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
           if (sra_id %in% srr_ids) {
-            # This is the correct GSM for this SRA ID
             cat(sprintf("Downloading SRA %s for GSM %s\n", sra_id, gsm_id))
+            dir.create(sra_dir, recursive = TRUE, showWarnings = FALSE)
             
-            # Create SRA directory if it doesn't exist
-            if (!dir.exists(sra_dir)) {
-              dir.create(sra_dir, recursive = TRUE)
+            # Download with prefetch
+            cmd <- sprintf('prefetch --max-size 100G -O %s %s 2>&1', sra_dir, sra_id)
+            result <- system(cmd, intern = TRUE)
+            cat("prefetch output:\n", paste(result, collapse = "\n"), "\n")
+            
+            # Verify download
+            if (file.exists(sra_file) && file.info(sra_file)$size > 0) {
+              cat(sprintf("Successfully downloaded SRA file: %s (size: %.2f MB)\n", 
+                         sra_file, file.info(sra_file)$size/1024/1024))
+              break
+            } else {
+              warning(sprintf("Failed to download SRA file: %s", sra_id))
             }
-            
-            # Download with prefetch with retry logic
-            max_retries <- 3
-            retry_count <- 0
-            success <- FALSE
-            
-            while (!success && retry_count < max_retries) {
-              tryCatch({
-                if (retry_count > 0) {
-                  delay_time <- 30 * retry_count  # Exponential backoff
-                  cat(sprintf("Retry %d: Waiting %d seconds before trying again...\n", 
-                             retry_count, delay_time))
-                  Sys.sleep(delay_time)
-                }
-                
-                # Download with prefetch and capture both stdout and stderr
-                cmd <- sprintf('prefetch --max-size 100G -O %s %s 2>&1', sra_dir, sra_id)
-                result <- system(cmd, intern = TRUE)
-                
-                # Log the full output of prefetch
-                cat("prefetch output:\n")
-                cat(paste(result, collapse = "\n"), "\n")
-                
-                # Check if download was successful
-                sra_subdir <- file.path(sra_dir, sra_id)
-                sra_file <- file.path(sra_subdir, paste0(sra_id, ".sra"))
-                
-                # Check the cache directory
-                cache_dir <- file.path(Sys.getenv("HOME"), "ncbi", "public", "sra")
-                cache_subdir <- file.path(cache_dir, sra_id)
-                cache_file <- file.path(cache_subdir, paste0(sra_id, ".sra"))
-                
-                if (file.exists(sra_file)) {
-                  file_size <- file.info(sra_file)$size
-                  if (file_size > 0) {
-                    cat(sprintf("Successfully downloaded SRA file: %s (size: %.2f MB)\n", 
-                               sra_file, file_size/1024/1024))
-                    success <- TRUE
-                  } else {
-                    cat(sprintf("SRA file exists but is empty: %s\n", sra_file))
-                    retry_count <- retry_count + 1
-                  }
-                } else if (file.exists(cache_file)) {
-                  cat(sprintf("Found SRA file in cache: %s\n", cache_file))
-                  # Create the subdirectory if it doesn't exist
-                  if (!dir.exists(sra_subdir)) {
-                    dir.create(sra_subdir, recursive = TRUE)
-                  }
-                  # Try to copy from cache
-                  if (file.copy(cache_file, sra_file)) {
-                    file_size <- file.info(sra_file)$size
-                    if (file_size > 0) {
-                      cat(sprintf("Copied SRA file from cache to: %s (size: %.2f MB)\n", 
-                                 sra_file, file_size/1024/1024))
-                      success <- TRUE
-                    } else {
-                      cat(sprintf("Copied file is empty: %s\n", sra_file))
-                      retry_count <- retry_count + 1
-                    }
-                  } else {
-                    cat(sprintf("Failed to copy SRA file from cache\n"))
-                    retry_count <- retry_count + 1
-                  }
-                } else {
-                  # Try to find the file in the current directory
-                  current_subdir <- file.path(getwd(), sra_id)
-                  current_file <- file.path(current_subdir, paste0(sra_id, ".sra"))
-                  if (file.exists(current_file)) {
-                    cat(sprintf("Found SRA file in current directory: %s\n", current_file))
-                    # Create the subdirectory if it doesn't exist
-                    if (!dir.exists(sra_subdir)) {
-                      dir.create(sra_subdir, recursive = TRUE)
-                    }
-                    if (file.copy(current_file, sra_file)) {
-                      file_size <- file.info(sra_file)$size
-                      if (file_size > 0) {
-                        cat(sprintf("Copied SRA file from current directory to: %s (size: %.2f MB)\n", 
-                                   sra_file, file_size/1024/1024))
-                        success <- TRUE
-                      } else {
-                        cat(sprintf("Copied file is empty: %s\n", sra_file))
-                        retry_count <- retry_count + 1
-                      }
-                    } else {
-                      cat(sprintf("Failed to copy SRA file from current directory\n"))
-                      retry_count <- retry_count + 1
-                    }
-                  } else {
-                    cat(sprintf("SRA file not found after download: %s\n", sra_file))
-                    retry_count <- retry_count + 1
-                  }
-                }
-              }, error = function(e) {
-                cat(sprintf("Error downloading %s (attempt %d): %s\n", 
-                           sra_id, retry_count + 1, e$message))
-                retry_count <- retry_count + 1
-              })
-            }
-            
-            if (!success) {
-              warning(sprintf("Failed to download SRA file after %d attempts: %s", 
-                            max_retries, sra_id))
-            }
-            
-            # Break the inner loop once we've found the correct GSM
-            break
           }
         }
       }
@@ -655,18 +521,14 @@ download_sra_files <- function(gse_id, sra_ids) {
 
 # Function to convert SRA to FASTQ
 convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
-  # Check if fasterq-dump is available
   if (!check_command("fasterq-dump")) {
     stop("fasterq-dump command not found. Please ensure SRA toolkit is installed and in PATH")
   }
   
-  # Use the existing GSE directory structure
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
   
-  # Convert SRA to FASTQ for each sample
   for (sra_id in sra_ids) {
-    # Find the corresponding GSM directory
     gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
     for (gsm_dir in gsm_dirs) {
       sra_file <- file.path(gsm_dir, "SRA", sra_id, paste0(sra_id, ".sra"))
@@ -674,58 +536,35 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
       
       if (file.exists(sra_file)) {
         cat(sprintf("Converting SRA %s to FASTQ in %s\n", sra_id, fastq_dir))
+        dir.create(fastq_dir, recursive = TRUE, showWarnings = FALSE)
         
-        # Create FASTQ directory if it doesn't exist
-        if (!dir.exists(fastq_dir)) {
-          dir.create(fastq_dir, recursive = TRUE)
-        }
-        
-        # Convert to FASTQ with detailed error handling
-        cmd <- sprintf('fasterq-dump --split-files --progress --threads %d --outdir %s %s 2>&1',
-                      threads, fastq_dir, sra_id)
-        result <- tryCatch({
-          system(cmd, intern = TRUE)
-        }, error = function(e) {
-          warning(sprintf("Error converting %s: %s", sra_id, e$message))
-          return(NULL)
-        })
-        
-        # Log the full output of fasterq-dump
-        if (!is.null(result)) {
-          cat("fasterq-dump output:\n")
-          cat(paste(result, collapse = "\n"), "\n")
-        }
-        
-        # Check if conversion was successful
-        if (!is.null(result)) {
-          if (length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
-            warning(sprintf("Error converting %s: %s", sra_id, paste(result, collapse="\n")))
-          } else {
-            # Verify FASTQ files were created
-            fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
-            if (length(fastq_files) == 0) {
-              warning(sprintf("No FASTQ files found after conversion for %s", sra_id))
-              # Try to get more information about the failure
-              cmd <- sprintf('fasterq-dump --split-files --progress --threads %d --outdir %s %s --verbose 2>&1',
-                            threads, fastq_dir, sra_id)
-              verbose_result <- system(cmd, intern = TRUE)
-              cat("Verbose fasterq-dump output:\n")
-              cat(paste(verbose_result, collapse = "\n"), "\n")
-            } else {
-              cat(sprintf("Successfully created FASTQ files: %s\n", 
-                         paste(basename(fastq_files), collapse = ", ")))
-              
-              # Compress the FASTQ files
-              for (fastq_file in fastq_files) {
-                cat(sprintf("Compressing %s\n", fastq_file))
-                cmd <- sprintf("pigz -p %d %s", threads, fastq_file)
-                system(cmd)
-              }
+        # Convert with timeout and retry logic
+        max_retries <- 3
+        for (retry in 1:max_retries) {
+          if (retry > 1) {
+            cat(sprintf("Retry %d: Waiting %d seconds...\n", retry, 30 * retry))
+            Sys.sleep(30 * retry)
+          }
+          
+          cmd <- sprintf('timeout 3600 fasterq-dump --split-files --progress --threads %d --outdir %s %s 2>&1',
+                        threads, fastq_dir, sra_id)
+          result <- system(cmd, intern = TRUE)
+          cat("fasterq-dump output:\n", paste(result, collapse = "\n"), "\n")
+          
+          # Check for success
+          fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
+          if (length(fastq_files) > 0) {
+            cat(sprintf("Successfully created FASTQ files: %s\n", 
+                       paste(basename(fastq_files), collapse = ", ")))
+            # Compress FASTQ files
+            for (fastq_file in fastq_files) {
+              system(sprintf("pigz -p %d %s", threads, fastq_file))
             }
+            break
+          } else if (retry == max_retries) {
+            warning(sprintf("Failed to convert SRA file after %d attempts: %s", max_retries, sra_id))
           }
         }
-      } else {
-        warning(sprintf("SRA file not found: %s", sra_file))
       }
     }
   }
@@ -734,7 +573,6 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
 # Main workflow
 main <- function(gse_id = NULL) {
   if (is.null(gse_id)) {
-    # Try to get GSE ID from command line arguments
     args <- commandArgs(trailingOnly = TRUE)
     if (length(args) > 0) {
       gse_id <- args[1]
@@ -744,87 +582,33 @@ main <- function(gse_id = NULL) {
   }
   
   tryCatch({
-    # Get base directory
     base_dir <- get_base_dir()
     cat(sprintf("Using base directory: %s\n", base_dir))
     
-    # Get SRX IDs from GSM IDs
+    # Get SRX IDs
     cat(sprintf("Getting SRX IDs for %s...\n", gse_id))
     srx_ids <- get_srx_ids(gse_id)
     if (is.null(srx_ids)) {
-      cat(sprintf("Failed to get SRX IDs for %s. This may be due to rate limiting or API issues.\n", gse_id))
-      cat("Please try again later or check if the GSE ID is valid and accessible.\n")
-      cat(sprintf("You can verify the GSE ID at: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=%s\n", gse_id))
-      return(NULL)
+      stop(sprintf("Failed to get SRX IDs for %s", gse_id))
     }
     
     # Convert SRX to SRA IDs
     cat("Converting SRX to SRA IDs...\n")
     sra_ids <- convert_srx_to_sra(srx_ids)
     if (is.null(sra_ids)) {
-      cat(sprintf("Failed to convert SRX to SRA IDs for %s. This may be due to rate limiting or API issues.\n", gse_id))
-      cat("Please try again later.\n")
-      return(NULL)
+      stop(sprintf("Failed to convert SRX to SRA IDs for %s", gse_id))
     }
     
-    # Download SRA files
+    # Download and convert files
     cat("Downloading SRA files...\n")
     download_sra_files(gse_id, sra_ids)
     
-    # Convert SRA to FASTQ
     cat("Converting SRA to FASTQ...\n")
     convert_sra_to_fastq(gse_id, sra_ids)
     
-    # Verify files were created
-    cat("Verifying files were created...\n")
-    gse_dir <- file.path(base_dir, gse_id)
-    if (dir.exists(gse_dir)) {
-      cat(sprintf("GSE directory exists: %s\n", gse_dir))
-      cat("Contents of GSE directory:\n")
-      system(sprintf("ls -la %s", gse_dir))
-      
-      samples_dir <- file.path(gse_dir, "samples")
-      if (dir.exists(samples_dir)) {
-        cat(sprintf("Samples directory exists: %s\n", samples_dir))
-        cat("Contents of samples directory:\n")
-        system(sprintf("ls -la %s", samples_dir))
-        
-        # Check each sample directory
-        sample_dirs <- list.dirs(samples_dir, recursive = FALSE)
-        for (sample_dir in sample_dirs) {
-          cat(sprintf("Contents of sample directory %s:\n", sample_dir))
-          system(sprintf("ls -la %s", sample_dir))
-          
-          # Check SRA directory
-          sra_dir <- file.path(sample_dir, "SRA")
-          if (dir.exists(sra_dir)) {
-            cat(sprintf("Contents of SRA directory %s:\n", sra_dir))
-            system(sprintf("ls -la %s", sra_dir))
-            
-            # Check FASTQ directory
-            fastq_dir <- file.path(sra_dir, "FASTQ")
-            if (dir.exists(fastq_dir)) {
-              cat(sprintf("Contents of FASTQ directory %s:\n", fastq_dir))
-              system(sprintf("ls -la %s", fastq_dir))
-            } else {
-              cat(sprintf("FASTQ directory does not exist: %s\n", fastq_dir))
-            }
-          } else {
-            cat(sprintf("SRA directory does not exist: %s\n", sra_dir))
-          }
-        }
-      } else {
-        cat(sprintf("Samples directory does not exist: %s\n", samples_dir))
-      }
-    } else {
-      cat(sprintf("GSE directory does not exist: %s\n", gse_dir))
-    }
-    
     cat("Download and conversion complete!\n")
   }, error = function(e) {
-    cat(sprintf("Error during download process: %s\n", e$message))
-    cat("Please check if the GSE ID is valid and accessible.\n")
-    cat(sprintf("You can verify the GSE ID at: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=%s\n", gse_id))
+    stop(sprintf("Error during download process: %s", e$message))
   })
 }
 
