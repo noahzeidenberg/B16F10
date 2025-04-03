@@ -1,6 +1,23 @@
 # SRA Download and Conversion Pipeline
 # This script downloads SRA files and converts them to FASTQ format
 
+# Load required modules
+tryCatch({
+  # Load SRA toolkit
+  system("module load sratoolkit", intern = TRUE)
+  # Load pigz for parallel compression
+  system("module load pigz", intern = TRUE)
+  
+  # Verify modules are loaded
+  if (!check_command("prefetch") || !check_command("fasterq-dump")) {
+    stop("Failed to load required modules. Please ensure sratoolkit and pigz are available.")
+  }
+}, error = function(e) {
+  cat("Error loading modules:", conditionMessage(e), "\n")
+  cat("Please ensure the required modules are available on your system.\n")
+  quit(status = 1)
+})
+
 # Load required packages
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
@@ -400,8 +417,23 @@ convert_srx_to_sra <- function(srx_ids) {
   return(all_sra_ids)
 }
 
+# Function to check if a command is available
+check_command <- function(cmd) {
+  tryCatch({
+    system(sprintf("which %s", cmd), intern = TRUE, ignore.stderr = TRUE)
+    return(TRUE)
+  }, error = function(e) {
+    return(FALSE)
+  })
+}
+
 # Function to download SRA files using prefetch
 download_sra_files <- function(gse_id, sra_ids) {
+  # Check if prefetch is available
+  if (!check_command("prefetch")) {
+    stop("prefetch command not found. Please ensure SRA toolkit is installed and in PATH")
+  }
+  
   # Use the existing GSE directory structure
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
@@ -420,7 +452,6 @@ download_sra_files <- function(gse_id, sra_ids) {
   # Download SRA files for each sample
   for (sra_id in sra_ids) {
     # Find the corresponding GSM directory by checking which GSM has this SRA ID
-    # This is a simplified approach - in a real scenario, you might need a more robust mapping
     for (i in seq_along(gsm_dirs)) {
       gsm_dir <- gsm_dirs[i]
       gsm_id <- gsm_ids[i]
@@ -434,7 +465,6 @@ download_sra_files <- function(gse_id, sra_ids) {
       }
       
       # Check if this SRA ID belongs to this GSM
-      # This is a simplified check - in a real scenario, you might need a more robust mapping
       gsm_rds <- file.path(gsm_dir, paste0(gsm_id, ".rds"))
       if (file.exists(gsm_rds)) {
         gsm_obj <- readRDS(gsm_rds)
@@ -443,14 +473,20 @@ download_sra_files <- function(gse_id, sra_ids) {
         if (length(sra_link) > 0) {
           srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
           # Check if this SRX ID maps to the current SRA ID
-          xml_result <- rentrez::entrez_fetch(db = "sra", id = srx_id, rettype = "xml")
+          xml_result <- make_api_request(rentrez::entrez_fetch, db = "sra", id = srx_id, rettype = "xml")
           xml_doc <- xml2::read_xml(xml_result)
           srr_ids <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
           if (sra_id %in% srr_ids) {
             # This is the correct GSM for this SRA ID
             cat(sprintf("Downloading SRA %s for GSM %s\n", sra_id, gsm_id))
-            cmd <- sprintf('prefetch --max-size 100G -O %s -p %s', 
-                          sra_dir, sra_id)
+            
+            # Create SRA directory if it doesn't exist
+            if (!dir.exists(sra_dir)) {
+              dir.create(sra_dir, recursive = TRUE)
+            }
+            
+            # Download with prefetch
+            cmd <- sprintf('prefetch --max-size 100G -O %s %s', sra_dir, sra_id)
             result <- tryCatch({
               system(cmd, intern = TRUE)
             }, error = function(e) {
@@ -459,8 +495,18 @@ download_sra_files <- function(gse_id, sra_ids) {
             })
             
             # Check if download was successful
-            if (!is.null(result) && length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
-              warning(sprintf("Error downloading %s: %s", sra_id, paste(result, collapse="\n")))
+            if (!is.null(result)) {
+              if (length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
+                warning(sprintf("Error downloading %s: %s", sra_id, paste(result, collapse="\n")))
+              } else {
+                # Verify the SRA file exists
+                sra_file <- file.path(sra_dir, paste0(sra_id, ".sra"))
+                if (!file.exists(sra_file)) {
+                  warning(sprintf("SRA file not found after download: %s", sra_file))
+                } else {
+                  cat(sprintf("Successfully downloaded SRA file: %s\n", sra_file))
+                }
+              }
             }
             
             # Break the inner loop once we've found the correct GSM
@@ -474,6 +520,11 @@ download_sra_files <- function(gse_id, sra_ids) {
 
 # Function to convert SRA to FASTQ
 convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
+  # Check if fasterq-dump is available
+  if (!check_command("fasterq-dump")) {
+    stop("fasterq-dump command not found. Please ensure SRA toolkit is installed and in PATH")
+  }
+  
   # Use the existing GSE directory structure
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
@@ -488,22 +539,43 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
       
       if (file.exists(sra_file)) {
         cat(sprintf("Converting SRA %s to FASTQ in %s\n", sra_id, fastq_dir))
+        
+        # Create FASTQ directory if it doesn't exist
+        if (!dir.exists(fastq_dir)) {
+          dir.create(fastq_dir, recursive = TRUE)
+        }
+        
         # Convert to FASTQ
         cmd <- sprintf('fasterq-dump --split-files --progress --threads %d --outdir %s %s',
                       threads, fastq_dir, sra_id)
-        result <- system(cmd, intern = TRUE)
+        result <- tryCatch({
+          system(cmd, intern = TRUE)
+        }, error = function(e) {
+          warning(sprintf("Error converting %s: %s", sra_id, e$message))
+          return(NULL)
+        })
         
         # Check if conversion was successful
-        if (length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
-          warning(sprintf("Error converting %s: %s", sra_id, paste(result, collapse="\n")))
-        }
-        
-        # Compress the FASTQ files
-        fastq_files <- list.files(fastq_dir, pattern = "\\.fastq$", full.names = TRUE)
-        for (fastq_file in fastq_files) {
-          cat(sprintf("Compressing %s\n", fastq_file))
-          cmd <- sprintf("pigz -p %d %s", threads, fastq_file)
-          system(cmd)
+        if (!is.null(result)) {
+          if (length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
+            warning(sprintf("Error converting %s: %s", sra_id, paste(result, collapse="\n")))
+          } else {
+            # Verify FASTQ files were created
+            fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
+            if (length(fastq_files) == 0) {
+              warning(sprintf("No FASTQ files found after conversion for %s", sra_id))
+            } else {
+              cat(sprintf("Successfully created FASTQ files: %s\n", 
+                         paste(basename(fastq_files), collapse = ", ")))
+              
+              # Compress the FASTQ files
+              for (fastq_file in fastq_files) {
+                cat(sprintf("Compressing %s\n", fastq_file))
+                cmd <- sprintf("pigz -p %d %s", threads, fastq_file)
+                system(cmd)
+              }
+            }
+          }
         }
       }
     }
