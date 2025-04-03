@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=01:00:00
+#SBATCH --time=04:30:00     # could maybe work with 4 hours, but using 6 just in case
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --job-name=test_process_rnaseq
 #SBATCH --output=logs/test_process_rnaseq/test_process_rnaseq_%j.out
 #SBATCH --error=logs/test_process_rnaseq/test_process_rnaseq_%j.err

@@ -64,8 +64,8 @@ run_fastp <- function(input_dir, output_dir) {
     html_report <- file.path(output_dir, paste0(sample_name, ".fastp.html"))
     
     cat(sprintf("Processing sample: %s\n", sample_name))
-    # Run fastp
-    cmd <- sprintf("fastp --in1 %s --in2 %s --out1 %s --out2 %s --json %s --html %s --thread %d",
+    # Run fastp. Note it allows up to 16 threads
+    cmd <- sprintf("fastp --in1 %s --in2 %s --out1 %s --out2 %s --json %s --html %s --thread 16",
                   r1_file, r2_file, out_r1, out_r2, json_report, html_report,
                   parallel::detectCores() - 1)
     cat(sprintf("Executing fastp command: %s\n", cmd))
