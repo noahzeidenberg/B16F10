@@ -11,6 +11,9 @@
 #SBATCH --array=1-72
 #SBATCH --tmp=100G
 
+# Enable debugging
+set -x
+
 # Load required modules
 module load sra-toolkit
 module load r
@@ -26,6 +29,18 @@ GSE_ID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" rna_seq_gse_ids.txt)
 SUBMIT_DIR=$(realpath $SLURM_SUBMIT_DIR)
 TMP_DIR=$(realpath $SLURM_TMPDIR)
 
+# Debug information
+echo "=== Debug Information ==="
+echo "SLURM_TMPDIR: $SLURM_TMPDIR"
+echo "TMP_DIR: $TMP_DIR"
+echo "SUBMIT_DIR: $SUBMIT_DIR"
+echo "Current working directory: $(pwd)"
+echo "SLURM_TMPDIR permissions:"
+ls -ld $SLURM_TMPDIR
+echo "SLURM_TMPDIR contents:"
+ls -la $SLURM_TMPDIR
+echo "=== End Debug Information ==="
+
 # Check if we should use temporary directory
 if [ "$USE_TMPDIR" = "0" ]; then
     echo "Using permanent directory for downloads"
@@ -35,27 +50,51 @@ else
     echo "Using temporary directory for downloads"
     # Create a temporary directory for this job
     WORK_DIR=$TMP_DIR/download_${GSE_ID}
-    mkdir -p $WORK_DIR
+    echo "Creating WORK_DIR: $WORK_DIR"
+    if ! mkdir -p $WORK_DIR; then
+        echo "Error: Failed to create WORK_DIR"
+        echo "TMP_DIR permissions:"
+        ls -ld $TMP_DIR
+        echo "TMP_DIR contents:"
+        ls -la $TMP_DIR
+        exit 1
+    fi
     cd $WORK_DIR
 
     # Copy the R script and .env file to the temporary directory
-    cp $SUBMIT_DIR/download_data.R .
-    cp $SUBMIT_DIR/.env .
+    echo "Copying files to WORK_DIR"
+    if ! cp $SUBMIT_DIR/download_data.R . || ! cp $SUBMIT_DIR/.env .; then
+        echo "Error: Failed to copy required files to WORK_DIR"
+        exit 1
+    fi
 fi
 
-# Run the R script
-Rscript download_data.R $GSE_ID
+# Function to copy files from temporary to permanent storage
+copy_files() {
+    echo "=== Starting copy_files function ==="
+    if [ "$USE_TMPDIR" = "0" ]; then
+        echo "Using permanent directory, no need to copy files"
+        return 0
+    fi
 
-# Copy files to permanent storage if using temporary directory
-if [ "$USE_TMPDIR" = "1" ]; then
     echo "=== Starting file copy operation ==="
     echo "Temporary directory: $WORK_DIR"
     echo "Permanent directory: $SUBMIT_DIR"
     echo "Current working directory: $(pwd)"
     
+    # Verify WORK_DIR exists and is accessible
+    if [ ! -d "$WORK_DIR" ]; then
+        echo "Error: WORK_DIR does not exist: $WORK_DIR"
+        return 1
+    fi
+    
     # Create the proper directory structure in the permanent location
     GSE_DIR=$SUBMIT_DIR/${GSE_ID}
-    mkdir -p $GSE_DIR/samples
+    echo "Creating GSE_DIR: $GSE_DIR"
+    if ! mkdir -p $GSE_DIR/samples; then
+        echo "Error: Failed to create GSE_DIR"
+        return 1
+    fi
     
     # Copy sample directories
     if [ -d "samples" ]; then
@@ -71,7 +110,10 @@ if [ "$USE_TMPDIR" = "1" ]; then
                 ls -la "$gsm_dir"
                 
                 # Create destination directory
-                mkdir -p "$GSE_DIR/samples/$gsm_id"
+                if ! mkdir -p "$GSE_DIR/samples/$gsm_id"; then
+                    echo "Error: Failed to create destination directory for $gsm_id"
+                    continue
+                fi
                 
                 # Copy with verbose output and error checking
                 echo "Starting copy operation..."
@@ -140,14 +182,37 @@ if [ "$USE_TMPDIR" = "1" ]; then
         done
     else
         echo "Error: Samples directory not found in permanent location"
-        exit 1
+        return 1
     fi
     
     echo "=== File copy operation complete ==="
-    
+    return 0
+}
+
+# Set up trap to handle signals
+trap 'echo "Received signal, copying files..."; copy_files; exit 1' SIGTERM SIGINT SIGUSR1
+
+# Run the R script
+echo "=== Starting R script execution ==="
+Rscript download_data.R $GSE_ID
+R_EXIT_CODE=$?
+echo "R script exit code: $R_EXIT_CODE"
+
+# Copy files to permanent storage if using temporary directory
+if [ "$USE_TMPDIR" = "1" ]; then
+    echo "=== Starting final file copy ==="
+    if ! copy_files; then
+        echo "Error: Failed to copy files to permanent storage"
+        exit 1
+    fi
+
     # Clean up only after successful copying
     cd $SUBMIT_DIR
-    rm -rf $WORK_DIR
+    echo "Cleaning up WORK_DIR: $WORK_DIR"
+    if ! rm -rf $WORK_DIR; then
+        echo "Warning: Failed to clean up WORK_DIR"
+        ls -la $WORK_DIR
+    fi
     echo "=== Cleanup complete ==="
 fi
 

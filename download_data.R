@@ -297,10 +297,10 @@ get_srx_ids <- function(gse_id) {
         return(NULL)
       }
       
-      # Get list of GSM objects
+      # Get list of GSM objects and filter out GPL
       gsm_list <- GSMList(gse)
       total_gsm <- length(gsm_list)
-      cat(sprintf("Found %d GSM objects to process\n", total_gsm))
+      cat(sprintf("Found %d GSM samples to process\n", total_gsm))
       
       # Save each GSM object and extract SRX IDs
       srx_ids <- sapply(seq_along(names(gsm_list)), function(i) {
@@ -346,7 +346,7 @@ get_srx_ids <- function(gse_id) {
         return(NULL)
       }
       
-      cat(sprintf("Successfully processed %d GSM objects and found %d SRX IDs\n", 
+      cat(sprintf("Successfully processed %d GSM samples and found %d SRX IDs\n", 
                   total_gsm, length(srx_ids)))
       return(srx_ids)
       
