@@ -104,7 +104,18 @@ get_base_dir <- function() {
     return(current_dir)
   }
   
-  # If we don't have write permissions, use a temporary directory
+  # Try to set write permissions on the current directory
+  tryCatch({
+    Sys.chmod(current_dir, mode = "0775", use_umask = FALSE)
+    if (file.create(test_file)) {
+      file.remove(test_file)
+      return(current_dir)
+    }
+  }, error = function(e) {
+    cat(sprintf("Warning: Could not set permissions on current directory: %s\n", e$message))
+  })
+  
+  # If we still don't have write permissions, use a temporary directory
   temp_dir <- file.path(tempdir(), "B16F10")
   if (!dir.exists(temp_dir)) {
     dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
