@@ -1,6 +1,16 @@
 # SRA Download and Conversion Pipeline
 # This script downloads SRA files and converts them to FASTQ format
 
+# Function to check if a command is available
+check_command <- function(cmd) {
+  tryCatch({
+    system(sprintf("which %s", cmd), intern = TRUE, ignore.stderr = TRUE)
+    return(TRUE)
+  }, error = function(e) {
+    return(FALSE)
+  })
+}
+
 # Verify required commands are available
 tryCatch({
   # Check for required commands
@@ -413,16 +423,6 @@ convert_srx_to_sra <- function(srx_ids) {
   }
   
   return(all_sra_ids)
-}
-
-# Function to check if a command is available
-check_command <- function(cmd) {
-  tryCatch({
-    system(sprintf("which %s", cmd), intern = TRUE, ignore.stderr = TRUE)
-    return(TRUE)
-  }, error = function(e) {
-    return(FALSE)
-  })
 }
 
 # Function to download SRA files using prefetch
