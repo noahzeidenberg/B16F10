@@ -217,45 +217,72 @@ create_sample_structure <- function(gse_dir, gsm_id) {
 # Add rate limiting mechanism
 last_request_time <- Sys.time()
 request_count <- 0
-MAX_REQUESTS_PER_MINUTE <- 10  # Changed from per second to per minute
+MAX_REQUESTS_PER_MINUTE <- 50  # Increased from 10 to 50 requests per minute
+MIN_REQUEST_INTERVAL <- 0.2  # Minimum time between requests in seconds
 
 # Function to enforce rate limiting
 enforce_rate_limit <- function() {
   current_time <- Sys.time()
   elapsed <- as.numeric(difftime(current_time, last_request_time, units = "secs"))
   
-  if (elapsed < 60) {
-    if (request_count >= MAX_REQUESTS_PER_MINUTE) {
-      # Wait until the next minute
-      wait_time <- 60 - elapsed
-      cat(sprintf("Rate limit reached. Waiting %.1f seconds...\n", wait_time))
-      Sys.sleep(wait_time)
-      request_count <<- 0
-      last_request_time <<- Sys.time()
-    }
-  } else {
+  # Always ensure minimum interval between requests
+  if (elapsed < MIN_REQUEST_INTERVAL) {
+    wait_time <- MIN_REQUEST_INTERVAL - elapsed
+    cat(sprintf("Enforcing minimum request interval. Waiting %.1f seconds...\n", wait_time))
+    Sys.sleep(wait_time)
+    current_time <- Sys.time()
+    elapsed <- MIN_REQUEST_INTERVAL
+  }
+  
+  # Reset counter if we're in a new minute
+  if (elapsed >= 60) {
     request_count <<- 0
     last_request_time <<- current_time
+  } else if (request_count >= MAX_REQUESTS_PER_MINUTE) {
+    # Wait until the next minute
+    wait_time <- 60 - elapsed
+    cat(sprintf("Rate limit reached (%d requests in %.1f seconds). Waiting %.1f seconds...\n", 
+                request_count, elapsed, wait_time))
+    Sys.sleep(wait_time)
+    request_count <<- 0
+    last_request_time <<- Sys.time()
   }
   
   request_count <<- request_count + 1
+  cat(sprintf("Request count: %d/%d (%.1f seconds elapsed)\n", 
+              request_count, MAX_REQUESTS_PER_MINUTE, elapsed))
 }
 
 # Function to make API request with rate limiting
 make_api_request <- function(fn, ...) {
-  enforce_rate_limit()
-  tryCatch({
-    result <- fn(...)
-    return(result)
-  }, error = function(e) {
-    if (grepl("HTTP 429|HTTP 403|Failed to perform HTTP request", e$message)) {
-      # Rate limit hit, wait and retry
-      Sys.sleep(1)
-      enforce_rate_limit()
-      return(fn(...))
-    }
-    stop(e)
-  })
+  max_retries <- 3
+  retry_count <- 0
+  
+  while (retry_count < max_retries) {
+    enforce_rate_limit()
+    tryCatch({
+      result <- fn(...)
+      return(result)
+    }, error = function(e) {
+      retry_count <<- retry_count + 1
+      
+      if (grepl("HTTP 429|HTTP 403|Failed to perform HTTP request", e$message)) {
+        # Rate limit hit, wait longer and retry
+        wait_time <- 10 * retry_count  # Exponential backoff
+        cat(sprintf("Rate limit hit (attempt %d of %d). Waiting %d seconds...\n", 
+                   retry_count, max_retries, wait_time))
+        Sys.sleep(wait_time)
+      } else {
+        cat(sprintf("Error in API request (attempt %d of %d): %s\n", 
+                   retry_count, max_retries, e$message))
+        if (retry_count >= max_retries) {
+          stop(e)
+        }
+      }
+    })
+  }
+  
+  stop("Maximum retries reached for API request")
 }
 
 # Function to get SRX IDs from GSM IDs and save GSM objects
