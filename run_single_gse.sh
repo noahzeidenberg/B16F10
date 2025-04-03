@@ -68,7 +68,18 @@ copy_files() {
                 gsm_id=$(basename "$gsm_dir")
                 echo "Copying $gsm_id to $GSE_DIR/samples/$gsm_id"
                 mkdir -p "$GSE_DIR/samples/$gsm_id"
-                cp -rv "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/"
+                
+                # Copy with verbose output and error checking
+                if ! cp -rv "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/" 2>&1; then
+                    echo "Error copying $gsm_id directory"
+                    return 1
+                fi
+                
+                # Verify the copy
+                if [ ! -d "$GSE_DIR/samples/$gsm_id" ]; then
+                    echo "Error: Failed to create $gsm_id directory in permanent location"
+                    return 1
+                fi
             fi
         done
     else
@@ -78,7 +89,10 @@ copy_files() {
     
     # Copy any other files from the GSE directory
     echo "Copying GSE directory contents..."
-    cp -rv "$TMP_GSE_DIR"/* "$GSE_DIR/"
+    if ! cp -rv "$TMP_GSE_DIR"/* "$GSE_DIR/" 2>&1; then
+        echo "Error copying GSE directory contents"
+        return 1
+    fi
     
     # Verify the copy was successful
     echo "Verifying files in permanent location:"

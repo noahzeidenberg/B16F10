@@ -210,17 +210,19 @@ create_sample_structure <- function(gse_dir, gsm_id) {
 # Add rate limiting mechanism
 last_request_time <- Sys.time()
 request_count <- 0
-MAX_REQUESTS_PER_SECOND <- 10
+MAX_REQUESTS_PER_MINUTE <- 10  # Changed from per second to per minute
 
 # Function to enforce rate limiting
 enforce_rate_limit <- function() {
   current_time <- Sys.time()
   elapsed <- as.numeric(difftime(current_time, last_request_time, units = "secs"))
   
-  if (elapsed < 1) {
-    if (request_count >= MAX_REQUESTS_PER_SECOND) {
-      # Wait until the next second
-      Sys.sleep(1 - elapsed)
+  if (elapsed < 60) {
+    if (request_count >= MAX_REQUESTS_PER_MINUTE) {
+      # Wait until the next minute
+      wait_time <- 60 - elapsed
+      cat(sprintf("Rate limit reached. Waiting %.1f seconds...\n", wait_time))
+      Sys.sleep(wait_time)
       request_count <<- 0
       last_request_time <<- Sys.time()
     }
@@ -483,28 +485,43 @@ download_sra_files <- function(gse_id, sra_ids) {
               dir.create(sra_dir, recursive = TRUE)
             }
             
-            # Download with prefetch
-            cmd <- sprintf('prefetch --max-size 100G -O %s %s', sra_dir, sra_id)
-            result <- tryCatch({
-              system(cmd, intern = TRUE)
-            }, error = function(e) {
-              warning(sprintf("Error downloading %s: %s", sra_id, e$message))
-              return(NULL)
-            })
+            # Download with prefetch with retry logic
+            max_retries <- 3
+            retry_count <- 0
+            success <- FALSE
             
-            # Check if download was successful
-            if (!is.null(result)) {
-              if (length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
-                warning(sprintf("Error downloading %s: %s", sra_id, paste(result, collapse="\n")))
-              } else {
-                # Verify the SRA file exists
-                sra_file <- file.path(sra_dir, paste0(sra_id, ".sra"))
-                if (!file.exists(sra_file)) {
-                  warning(sprintf("SRA file not found after download: %s", sra_file))
-                } else {
-                  cat(sprintf("Successfully downloaded SRA file: %s\n", sra_file))
+            while (!success && retry_count < max_retries) {
+              tryCatch({
+                if (retry_count > 0) {
+                  delay_time <- 30 * retry_count  # Exponential backoff
+                  cat(sprintf("Retry %d: Waiting %d seconds before trying again...\n", 
+                             retry_count, delay_time))
+                  Sys.sleep(delay_time)
                 }
-              }
+                
+                # Download with prefetch
+                cmd <- sprintf('prefetch --max-size 100G -O %s %s', sra_dir, sra_id)
+                result <- system(cmd, intern = TRUE)
+                
+                # Check if download was successful
+                sra_file <- file.path(sra_dir, paste0(sra_id, ".sra"))
+                if (file.exists(sra_file)) {
+                  cat(sprintf("Successfully downloaded SRA file: %s\n", sra_file))
+                  success <- TRUE
+                } else {
+                  cat(sprintf("SRA file not found after download: %s\n", sra_file))
+                  retry_count <- retry_count + 1
+                }
+              }, error = function(e) {
+                cat(sprintf("Error downloading %s (attempt %d): %s\n", 
+                           sra_id, retry_count + 1, e$message))
+                retry_count <- retry_count + 1
+              })
+            }
+            
+            if (!success) {
+              warning(sprintf("Failed to download SRA file after %d attempts: %s", 
+                            max_retries, sra_id))
             }
             
             # Break the inner loop once we've found the correct GSM
