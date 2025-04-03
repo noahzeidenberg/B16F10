@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=04:00:00
+#SBATCH --time=04:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=16  # 16 threads for fastp
 #SBATCH --mem=64G
 #SBATCH --job-name=process_rnaseq
 #SBATCH --output=logs/process_rnaseq/process_rnaseq_%A_%a.out
