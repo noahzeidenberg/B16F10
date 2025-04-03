@@ -188,64 +188,112 @@ get_srx_ids <- function(gse_id) {
   
   # Get the GEO object without matrix
   cat(sprintf("Fetching GSM information for %s...\n", gse_id))
-  gse <- getGEO(gse_id, GSEMatrix = FALSE)
   
-  # Check if this is HTS data
-  data_type <- Meta(gse)$type
-  if (is.null(data_type) || !grepl("high throughput sequencing", data_type, ignore.case = TRUE)) {
-    cat(sprintf("Dataset %s is not High-Throughput Sequencing data. Found type: %s. Skipping...\n", 
-                 gse_id, ifelse(is.null(data_type), "unknown", data_type)))
-    return(NULL)
-  }
+  # Add retry logic for getGEO
+  max_retries <- 3
+  retry_count <- 0
+  success <- FALSE
   
-  # Get list of GSM objects
-  gsm_list <- GSMList(gse)
-  total_gsm <- length(gsm_list)
-  cat(sprintf("Found %d GSM objects to process\n", total_gsm))
-  
-  # Save each GSM object and extract SRX IDs
-  srx_ids <- sapply(seq_along(names(gsm_list)), function(i) {
-    gsm_name <- names(gsm_list)[i]
-    gsm <- gsm_list[[gsm_name]]
-    
-    cat(sprintf("Processing GSM %d of %d: %s\n", i, total_gsm, gsm_name))
-    
+  while (!success && retry_count < max_retries) {
     tryCatch({
-      # Create sample directory structure
-      sample_dir <- create_sample_structure(gse_dir, gsm_name)
-      
-      # Save GSM object
-      rds_file <- file.path(sample_dir, paste0(gsm_name, ".rds"))
-      saveRDS(gsm, rds_file)
-      cat(sprintf("Saved GSM object to: %s\n", rds_file))
-      
-      # Extract SRX ID
-      relations <- Meta(gsm)$relation
-      sra_link <- relations[grep("SRA:", relations)]
-      if (length(sra_link) > 0) {
-        srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
-        cat(sprintf("Found SRX ID: %s\n", srx_id))
-        return(srx_id)
+      # Add a delay before each attempt to avoid rate limiting
+      if (retry_count > 0) {
+        delay_time <- 5 * retry_count  # Increase delay with each retry
+        cat(sprintf("Retry %d: Waiting %d seconds before trying again...\n", 
+                   retry_count, delay_time))
+        Sys.sleep(delay_time)
       }
-      cat("No SRX ID found for this GSM\n")
-      return(NA)
+      
+      # Try to get the GEO object
+      gse <- getGEO(gse_id, GSEMatrix = FALSE)
+      success <- TRUE
+      
+      # Check if this is HTS data
+      data_type <- Meta(gse)$type
+      if (is.null(data_type) || !grepl("high throughput sequencing", data_type, ignore.case = TRUE)) {
+        cat(sprintf("Dataset %s is not High-Throughput Sequencing data. Found type: %s. Skipping...\n", 
+                   gse_id, ifelse(is.null(data_type), "unknown", data_type)))
+        return(NULL)
+      }
+      
+      # Get list of GSM objects
+      gsm_list <- GSMList(gse)
+      total_gsm <- length(gsm_list)
+      cat(sprintf("Found %d GSM objects to process\n", total_gsm))
+      
+      # Save each GSM object and extract SRX IDs
+      srx_ids <- sapply(seq_along(names(gsm_list)), function(i) {
+        gsm_name <- names(gsm_list)[i]
+        gsm <- gsm_list[[gsm_name]]
+        
+        cat(sprintf("Processing GSM %d of %d: %s\n", i, total_gsm, gsm_name))
+        
+        tryCatch({
+          # Create sample directory structure
+          sample_dir <- create_sample_structure(gse_dir, gsm_name)
+          
+          # Save GSM object
+          rds_file <- file.path(sample_dir, paste0(gsm_name, ".rds"))
+          saveRDS(gsm, rds_file)
+          cat(sprintf("Saved GSM object to: %s\n", rds_file))
+          
+          # Extract SRX ID
+          relations <- Meta(gsm)$relation
+          sra_link <- relations[grep("SRA:", relations)]
+          if (length(sra_link) > 0) {
+            srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+            cat(sprintf("Found SRX ID: %s\n", srx_id))
+            return(srx_id)
+          }
+          cat("No SRX ID found for this GSM\n")
+          return(NA)
+        }, error = function(e) {
+          cat(sprintf("Error processing GSM %s: %s\n", gsm_name, e$message))
+          return(NA)
+        })
+      })
+      
+      # Remove any NA values
+      srx_ids <- srx_ids[!is.na(srx_ids)]
+      
+      if (length(srx_ids) == 0) {
+        cat(sprintf("No SRX IDs found for GSE ID: %s. Skipping...\n", gse_id))
+        return(NULL)
+      }
+      
+      cat(sprintf("Successfully processed %d GSM objects and found %d SRX IDs\n", 
+                  total_gsm, length(srx_ids)))
+      return(srx_ids)
+      
     }, error = function(e) {
-      cat(sprintf("Error processing GSM %s: %s\n", gsm_name, e$message))
-      return(NA)
+      retry_count <- retry_count + 1
+      
+      # Check if it's an HTTP 403 error
+      if (grepl("HTTP 403", e$message)) {
+        cat(sprintf("HTTP 403 Forbidden error (attempt %d of %d). This may be due to rate limiting.\n", 
+                   retry_count, max_retries))
+        
+        # If we've tried all retries, return NULL to skip this GSE
+        if (retry_count >= max_retries) {
+          cat("Maximum retries reached. Skipping this GSE ID.\n")
+          return(NULL)
+        }
+      } else {
+        # For other errors, just report them
+        cat(sprintf("Error fetching GEO data (attempt %d of %d): %s\n", 
+                   retry_count, max_retries, e$message))
+        
+        # If we've tried all retries, return NULL to skip this GSE
+        if (retry_count >= max_retries) {
+          cat("Maximum retries reached. Skipping this GSE ID.\n")
+          return(NULL)
+        }
+      }
     })
-  })
-  
-  # Remove any NA values
-  srx_ids <- srx_ids[!is.na(srx_ids)]
-  
-  if (length(srx_ids) == 0) {
-    cat(sprintf("No SRX IDs found for GSE ID: %s. Skipping...\n", gse_id))
-    return(NULL)
   }
   
-  cat(sprintf("Successfully processed %d GSM objects and found %d SRX IDs\n", 
-              total_gsm, length(srx_ids)))
-  return(srx_ids)
+  # If we get here, we've exhausted all retries
+  return(NULL)
 }
 
 # Function to convert SRX IDs to SRA IDs using rentrez
@@ -258,36 +306,76 @@ convert_srx_to_sra <- function(srx_ids) {
     srx_id <- srx_ids[i]
     cat(sprintf("Processing SRX ID %d of %d: %s\n", i, length(srx_ids), srx_id))
     
-    tryCatch({
-      # Use rentrez to get SRR ID(s)
-      xml_result <- rentrez::entrez_fetch(db = "sra", id = srx_id, rettype = "xml")
-      xml_doc <- xml2::read_xml(xml_result)
-      srr_ids <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
-      
-      # Filter for valid SRR IDs
-      valid_srr_ids <- srr_ids[grepl("^SRR", srr_ids)]
-      
-      if (length(valid_srr_ids) > 0) {
-        sra_ids[[srx_id]] <- valid_srr_ids
-        cat(sprintf("Found %d SRA ID(s): %s\n", 
-                   length(valid_srr_ids), 
-                   paste(valid_srr_ids, collapse = ", ")))
-      } else {
-        cat(sprintf("No valid SRA IDs found for SRX ID: %s\n", srx_id))
-      }
-    }, error = function(e) {
-      cat(sprintf("Error processing SRX ID %s: %s\n", srx_id, e$message))
-    })
+    # Add retry logic for rentrez API calls
+    max_retries <- 3
+    retry_count <- 0
+    success <- FALSE
     
-    # Add a small delay to avoid hitting rate limits
-    Sys.sleep(0.5)
+    while (!success && retry_count < max_retries) {
+      tryCatch({
+        # Add a delay before each attempt to avoid rate limiting
+        if (retry_count > 0) {
+          delay_time <- 5 * retry_count  # Increase delay with each retry
+          cat(sprintf("Retry %d: Waiting %d seconds before trying again...\n", 
+                     retry_count, delay_time))
+          Sys.sleep(delay_time)
+        }
+        
+        # Use rentrez to get SRR ID(s)
+        xml_result <- rentrez::entrez_fetch(db = "sra", id = srx_id, rettype = "xml")
+        xml_doc <- xml2::read_xml(xml_result)
+        srr_ids <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
+        
+        # Filter for valid SRR IDs
+        valid_srr_ids <- srr_ids[grepl("^SRR", srr_ids)]
+        
+        if (length(valid_srr_ids) > 0) {
+          sra_ids[[srx_id]] <- valid_srr_ids
+          cat(sprintf("Found %d SRA ID(s): %s\n", 
+                     length(valid_srr_ids), 
+                     paste(valid_srr_ids, collapse = ", ")))
+          success <- TRUE
+        } else {
+          cat(sprintf("No valid SRA IDs found for SRX ID: %s\n", srx_id))
+          success <- TRUE  # Still mark as success to avoid retries
+        }
+      }, error = function(e) {
+        retry_count <- retry_count + 1
+        
+        # Check if it's an HTTP 403 error
+        if (grepl("HTTP 403", e$message)) {
+          cat(sprintf("HTTP 403 Forbidden error (attempt %d of %d). This may be due to rate limiting.\n", 
+                     retry_count, max_retries))
+          
+          # If we've tried all retries, skip this SRX ID
+          if (retry_count >= max_retries) {
+            cat("Maximum retries reached. Skipping this SRX ID.\n")
+            success <- TRUE  # Mark as success to avoid further retries
+          }
+        } else {
+          # For other errors, just report them
+          cat(sprintf("Error processing SRX ID %s (attempt %d of %d): %s\n", 
+                     srx_id, retry_count, max_retries, e$message))
+          
+          # If we've tried all retries, skip this SRX ID
+          if (retry_count >= max_retries) {
+            cat("Maximum retries reached. Skipping this SRX ID.\n")
+            success <- TRUE  # Mark as success to avoid further retries
+          }
+        }
+      })
+    }
+    
+    # Add a small delay between SRX IDs to avoid hitting rate limits
+    Sys.sleep(1)
   }
   
   # Flatten the list of SRA IDs
   all_sra_ids <- unlist(sra_ids)
   
   if (length(all_sra_ids) == 0) {
-    stop("No SRA IDs found for any of the SRX IDs")
+    cat("No SRA IDs found for any of the SRX IDs\n")
+    return(NULL)
   }
   
   return(all_sra_ids)
@@ -424,14 +512,19 @@ main <- function(gse_id = NULL) {
     cat(sprintf("Getting SRX IDs for %s...\n", gse_id))
     srx_ids <- get_srx_ids(gse_id)
     if (is.null(srx_ids)) {
-      stop("Failed to get SRX IDs")
+      cat(sprintf("Failed to get SRX IDs for %s. This may be due to rate limiting or API issues.\n", gse_id))
+      cat("Please try again later or check if the GSE ID is valid and accessible.\n")
+      cat(sprintf("You can verify the GSE ID at: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=%s\n", gse_id))
+      return(NULL)
     }
     
     # Convert SRX to SRA IDs
     cat("Converting SRX to SRA IDs...\n")
     sra_ids <- convert_srx_to_sra(srx_ids)
     if (is.null(sra_ids)) {
-      stop("Failed to convert SRX to SRA IDs")
+      cat(sprintf("Failed to convert SRX to SRA IDs for %s. This may be due to rate limiting or API issues.\n", gse_id))
+      cat("Please try again later.\n")
+      return(NULL)
     }
     
     # Download SRA files
