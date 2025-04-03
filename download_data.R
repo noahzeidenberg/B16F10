@@ -3,6 +3,9 @@
 
 # Load required modules
 tryCatch({
+  # Source the module initialization script
+  system("source /etc/profile.d/modules.sh", intern = TRUE)
+  
   # Load SRA toolkit
   system("module load sratoolkit", intern = TRUE)
   # Load pigz for parallel compression

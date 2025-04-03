@@ -41,6 +41,11 @@ cd $TMP_DIR
 cp $SLURM_SUBMIT_DIR/download_data.R .
 cp $SLURM_SUBMIT_DIR/.env .
 
+# Load required modules again in case they were unloaded in temporary directory
+module load sra-toolkit
+module load r
+module load gcc
+
 # Run the R script
 Rscript download_data.R $GSE_ID
 
