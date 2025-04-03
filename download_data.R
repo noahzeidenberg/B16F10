@@ -1,22 +1,18 @@
 # SRA Download and Conversion Pipeline
 # This script downloads SRA files and converts them to FASTQ format
 
-# Load required modules
+# Verify required commands are available
 tryCatch({
-  # Module initialization is handled by the shell environment
-  
-  # Load SRA toolkit
-  system("module load sratoolkit", intern = TRUE)
-  # Load pigz for parallel compression
-  system("module load pigz", intern = TRUE)
-  
-  # Verify modules are loaded
+  # Check for required commands
   if (!check_command("prefetch") || !check_command("fasterq-dump")) {
-    stop("Failed to load required modules. Please ensure sratoolkit and pigz are available.")
+    stop("Required commands not found. Please ensure sra-toolkit is loaded in the SLURM script.")
+  }
+  if (!check_command("pigz")) {
+    stop("pigz command not found. Please ensure pigz is loaded in the SLURM script.")
   }
 }, error = function(e) {
-  cat("Error loading modules:", conditionMessage(e), "\n")
-  cat("Please ensure the required modules are available on your system.\n")
+  cat("Error verifying commands:", conditionMessage(e), "\n")
+  cat("Please ensure the required modules are loaded in the SLURM script.\n")
   quit(status = 1)
 })
 
