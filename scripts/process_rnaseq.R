@@ -145,7 +145,7 @@ main <- function(gse_id = NULL) {
   }
   
   # Set up directories
-  base_dir <- file.path(Sys.getenv("SLURM_TMPDIR"), gse_id)
+  base_dir <- file.path(getwd(), "results", gse_id)
   fastqc_dir <- file.path(base_dir, "fastqc")
   trimmed_dir <- file.path(base_dir, "trimmed")
   star_index_dir <- file.path(base_dir, "star_index")
@@ -153,8 +153,8 @@ main <- function(gse_id = NULL) {
   counts_dir <- file.path(base_dir, "counts")
   
   # Reference files
-  ref_fasta <- file.path(Sys.getenv("SLURM_SUBMIT_DIR"), "mm39", "GCF_000001635.27_GRCm39_genomic.fasta")
-  ref_gff <- file.path(Sys.getenv("SLURM_SUBMIT_DIR"), "mm39", "GCF_000001635.27_GRCm39_genomic.gff")
+  ref_fasta <- file.path(getwd(), "mm39", "GCF_000001635.27_GRCm39_genomic.fasta")
+  ref_gff <- file.path(getwd(), "mm39", "GCF_000001635.27_GRCm39_genomic.gff")
   
   # Verify reference files exist
   if (!file.exists(ref_fasta) || !file.exists(ref_gff)) {
