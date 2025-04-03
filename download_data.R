@@ -89,14 +89,18 @@ check_disk_space <- function(path) {
 
 # Function to determine the appropriate base directory
 get_base_dir <- function() {
+  # Get current directory
+  current_dir <- getwd()
+  cat(sprintf("Current working directory: %s\n", current_dir))
+  
   # Check if we're running in SLURM
   if (Sys.getenv("SLURM_TMPDIR") != "") {
+    cat("Running in SLURM environment\n")
     return(Sys.getenv("SLURM_TMPDIR"))
   }
   
   # When running manually, always use current directory
-  current_dir <- getwd()
-  cat(sprintf("Running manually, using current directory: %s\n", current_dir))
+  cat("Running manually, using current directory\n")
   return(current_dir)
 }
 
@@ -106,8 +110,15 @@ create_gse_structure <- function(gse_id) {
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
   
+  cat(sprintf("Attempting to create GSE directory: %s\n", gse_dir))
+  
   # Create directory with error checking
-  if (!dir.create(gse_dir, showWarnings = FALSE, recursive = TRUE)) {
+  if (!dir.create(gse_dir, showWarnings = TRUE, recursive = TRUE)) {
+    cat(sprintf("Directory creation failed. Checking permissions...\n"))
+    cat(sprintf("Directory exists: %s\n", dir.exists(gse_dir)))
+    cat(sprintf("Parent directory exists: %s\n", dir.exists(dirname(gse_dir))))
+    cat(sprintf("Parent directory permissions: %s\n", 
+                system(sprintf("ls -ld %s", dirname(gse_dir)), intern = TRUE)))
     stop(sprintf("Failed to create GSE directory: %s", gse_dir))
   }
   
@@ -118,7 +129,7 @@ create_gse_structure <- function(gse_id) {
   )
   
   for (dir in dirs) {
-    if (!dir.create(dir, showWarnings = FALSE, recursive = TRUE)) {
+    if (!dir.create(dir, showWarnings = TRUE, recursive = TRUE)) {
       stop(sprintf("Failed to create directory: %s", dir))
     }
   }
