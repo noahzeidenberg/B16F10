@@ -60,9 +60,10 @@ copy_files() {
         return 0
     fi
 
-    echo "Copying files from temporary to permanent storage..."
+    echo "=== Starting file copy operation ==="
     echo "Temporary directory: $TMP_DIR"
     echo "Permanent directory: $SLURM_SUBMIT_DIR"
+    echo "Current working directory: $(pwd)"
     
     # Find all GSE directories in the temporary location
     local TMP_GSE_DIRS=$(find $TMP_DIR -type d -name "$GSE_ID")
@@ -76,6 +77,7 @@ copy_files() {
     fi
     
     # Create the proper directory structure in the permanent location
+    echo "Creating permanent directory structure at $GSE_DIR"
     mkdir -p $GSE_DIR/samples
     
     # Process each GSE directory found
@@ -144,7 +146,8 @@ copy_files() {
     done
     
     # Final verification of all copied files
-    echo "Verifying files in permanent location:"
+    echo "=== Verifying files in permanent location ==="
+    echo "Checking $GSE_DIR"
     if [ -d "$GSE_DIR/samples" ]; then
         echo "Contents of $GSE_DIR/samples:"
         ls -la "$GSE_DIR/samples"
@@ -170,6 +173,7 @@ copy_files() {
         return 1
     fi
     
+    echo "=== File copy operation complete ==="
     return 0
 }
 
@@ -181,6 +185,7 @@ Rscript download_data.R $GSE_ID
 
 # Copy files to permanent storage if using temporary directory
 if [ "$USE_TMPDIR" = "1" ]; then
+    echo "=== Starting final file copy ==="
     if ! copy_files; then
         echo "Error: Failed to copy files to permanent storage"
         exit 1
@@ -189,6 +194,7 @@ if [ "$USE_TMPDIR" = "1" ]; then
     # Clean up only after successful copying
     cd $SLURM_SUBMIT_DIR
     rm -rf $TMP_DIR
+    echo "=== Cleanup complete ==="
 fi
 
 echo "Download and conversion complete for $GSE_ID"
