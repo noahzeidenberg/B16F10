@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=03:30:00
+#SBATCH --time=06:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=48G
 #SBATCH --job-name=download_rnaseq
 #SBATCH --output=logs/download_rnaseq/download_rnaseq_%A_%a.out
@@ -15,6 +15,7 @@
 module load sra-toolkit
 module load r
 module load gcc
+module load pigz
 
 # Set up environment
 source ~/scratch/B16F10/.venv/bin/activate

@@ -306,11 +306,17 @@ download_sra_files <- function(gse_id, sra_ids) {
                  available_space))
   }
   
+  # Create a mapping of SRA IDs to GSM directories
+  gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
+  gsm_ids <- basename(gsm_dirs)
+  
   # Download SRA files for each sample
   for (sra_id in sra_ids) {
-    # Find the corresponding GSM directory
-    gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
-    for (gsm_dir in gsm_dirs) {
+    # Find the corresponding GSM directory by checking which GSM has this SRA ID
+    # This is a simplified approach - in a real scenario, you might need a more robust mapping
+    for (i in seq_along(gsm_dirs)) {
+      gsm_dir <- gsm_dirs[i]
+      gsm_id <- gsm_ids[i]
       sra_dir <- file.path(gsm_dir, "SRA")
       
       # Check space again before each download
@@ -320,18 +326,40 @@ download_sra_files <- function(gse_id, sra_ids) {
                      sra_id, available_space))
       }
       
-      cmd <- sprintf('prefetch --max-size 100G -O %s -p %s', 
-                     sra_dir, sra_id)
-      result <- tryCatch({
-        system(cmd, intern = TRUE)
-      }, error = function(e) {
-        warning(sprintf("Error downloading %s: %s", sra_id, e$message))
-        return(NULL)
-      })
-      
-      # Check if download was successful
-      if (!is.null(result) && length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
-        warning(sprintf("Error downloading %s: %s", sra_id, paste(result, collapse="\n")))
+      # Check if this SRA ID belongs to this GSM
+      # This is a simplified check - in a real scenario, you might need a more robust mapping
+      gsm_rds <- file.path(gsm_dir, paste0(gsm_id, ".rds"))
+      if (file.exists(gsm_rds)) {
+        gsm_obj <- readRDS(gsm_rds)
+        relations <- Meta(gsm_obj)$relation
+        sra_link <- relations[grep("SRA:", relations)]
+        if (length(sra_link) > 0) {
+          srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+          # Check if this SRX ID maps to the current SRA ID
+          xml_result <- rentrez::entrez_fetch(db = "sra", id = srx_id, rettype = "xml")
+          xml_doc <- xml2::read_xml(xml_result)
+          srr_ids <- xml2::xml_find_all(xml_doc, ".//RUN") |> xml2::xml_attr("accession")
+          if (sra_id %in% srr_ids) {
+            # This is the correct GSM for this SRA ID
+            cat(sprintf("Downloading SRA %s for GSM %s\n", sra_id, gsm_id))
+            cmd <- sprintf('prefetch --max-size 100G -O %s -p %s', 
+                          sra_dir, sra_id)
+            result <- tryCatch({
+              system(cmd, intern = TRUE)
+            }, error = function(e) {
+              warning(sprintf("Error downloading %s: %s", sra_id, e$message))
+              return(NULL)
+            })
+            
+            # Check if download was successful
+            if (!is.null(result) && length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
+              warning(sprintf("Error downloading %s: %s", sra_id, paste(result, collapse="\n")))
+            }
+            
+            # Break the inner loop once we've found the correct GSM
+            break
+          }
+        }
       }
     }
   }
@@ -352,14 +380,21 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
       fastq_dir <- file.path(gsm_dir, "SRA", "FASTQ")
       
       if (file.exists(sra_file)) {
+        cat(sprintf("Converting SRA %s to FASTQ in %s\n", sra_id, fastq_dir))
         # Convert to FASTQ
         cmd <- sprintf('fasterq-dump --split-files --progress --threads %d --outdir %s %s',
                       threads, fastq_dir, sra_id)
-        system(cmd, intern = TRUE)
+        result <- system(cmd, intern = TRUE)
+        
+        # Check if conversion was successful
+        if (length(grep("error|failed", result, ignore.case = TRUE)) > 0) {
+          warning(sprintf("Error converting %s: %s", sra_id, paste(result, collapse="\n")))
+        }
         
         # Compress the FASTQ files
         fastq_files <- list.files(fastq_dir, pattern = "\\.fastq$", full.names = TRUE)
         for (fastq_file in fastq_files) {
+          cat(sprintf("Compressing %s\n", fastq_file))
           cmd <- sprintf("pigz -p %d %s", threads, fastq_file)
           system(cmd)
         }
