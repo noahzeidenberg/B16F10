@@ -89,9 +89,13 @@ check_disk_space <- function(path) {
 
 # Function to create directory structure for a GSE ID
 create_gse_structure <- function(gse_id) {
-  # Create main GSE directory in the temporary directory
-  gse_dir <- file.path(Sys.getenv("SLURM_TMPDIR"), gse_id)
-  dir.create(gse_dir, showWarnings = FALSE, recursive = TRUE)
+  # Create main GSE directory in the current directory
+  gse_dir <- file.path(getwd(), gse_id)
+  
+  # Create directory with error checking
+  if (!dir.create(gse_dir, showWarnings = FALSE, recursive = TRUE)) {
+    stop(sprintf("Failed to create GSE directory: %s", gse_dir))
+  }
   
   # Create subdirectories
   dirs <- c(
@@ -100,9 +104,12 @@ create_gse_structure <- function(gse_id) {
   )
   
   for (dir in dirs) {
-    dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+    if (!dir.create(dir, showWarnings = FALSE, recursive = TRUE)) {
+      stop(sprintf("Failed to create directory: %s", dir))
+    }
   }
   
+  cat(sprintf("Created directory structure at: %s\n", gse_dir))
   return(gse_dir)
 }
 
@@ -110,7 +117,11 @@ create_gse_structure <- function(gse_id) {
 create_sample_structure <- function(gse_dir, gsm_id) {
   # Create sample directory
   sample_dir <- file.path(gse_dir, "samples", gsm_id)
-  dir.create(sample_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  # Create directory with error checking
+  if (!dir.create(sample_dir, showWarnings = FALSE, recursive = TRUE)) {
+    stop(sprintf("Failed to create sample directory: %s", sample_dir))
+  }
   
   # Create subdirectories
   dirs <- c(
@@ -119,9 +130,12 @@ create_sample_structure <- function(gse_dir, gsm_id) {
   )
   
   for (dir in dirs) {
-    dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+    if (!dir.create(dir, showWarnings = FALSE, recursive = TRUE)) {
+      stop(sprintf("Failed to create directory: %s", dir))
+    }
   }
   
+  cat(sprintf("Created sample directory structure at: %s\n", sample_dir))
   return(sample_dir)
 }
 
@@ -158,7 +172,9 @@ get_srx_ids <- function(gse_id) {
       sample_dir <- create_sample_structure(gse_dir, gsm_name)
       
       # Save GSM object
-      saveRDS(gsm, file.path(sample_dir, paste0(gsm_name, ".rds")))
+      rds_file <- file.path(sample_dir, paste0(gsm_name, ".rds"))
+      saveRDS(gsm, rds_file)
+      cat(sprintf("Saved GSM object to: %s\n", rds_file))
       
       # Extract SRX ID
       relations <- Meta(gsm)$relation
