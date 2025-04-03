@@ -349,6 +349,10 @@ main <- function(gse_id = NULL) {
   }
   
   tryCatch({
+    # Get base directory
+    base_dir <- get_base_dir()
+    cat(sprintf("Using base directory: %s\n", base_dir))
+    
     # Get SRX IDs from GSM IDs
     cat(sprintf("Getting SRX IDs for %s...\n", gse_id))
     srx_ids <- get_srx_ids(gse_id)
@@ -375,7 +379,7 @@ main <- function(gse_id = NULL) {
   }, error = function(e) {
     cat(sprintf("Error during download process: %s\n", e$message))
     cat("Please check if the GSE ID is valid and accessible.\n")
-    cat("You can verify the GSE ID at: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=%s\n", gse_id)
+    cat(sprintf("You can verify the GSE ID at: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=%s\n", gse_id))
   })
 }
 
