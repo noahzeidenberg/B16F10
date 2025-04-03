@@ -269,13 +269,12 @@ get_srx_ids <- function(gse_id) {
   max_retries <- 3
   retry_count <- 0
   success <- FALSE
-  base_delay <- 60  # Start with 1 minute delay
   
   while (!success && retry_count < max_retries) {
     tryCatch({
       # Add a delay before each attempt to avoid rate limiting
       if (retry_count > 0) {
-        delay_time <- base_delay * (2 ^ (retry_count - 1))  # Exponential backoff
+        delay_time <- 5 * retry_count  # Increase delay with each retry
         cat(sprintf("Retry %d: Waiting %d seconds before trying again...\n", 
                    retry_count, delay_time))
         Sys.sleep(delay_time)
@@ -348,7 +347,7 @@ get_srx_ids <- function(gse_id) {
       if (grepl("HTTP 429|HTTP 403|Failed to perform HTTP request", e$message)) {
         cat(sprintf("Rate limit hit (attempt %d of %d). Waiting before retry...\n", 
                    retry_count, max_retries))
-        # Don't sleep here, let the next iteration handle the delay
+        Sys.sleep(10 * retry_count)  # Exponential backoff
       } else {
         cat(sprintf("Error fetching GEO data (attempt %d of %d): %s\n", 
                    retry_count, max_retries, e$message))

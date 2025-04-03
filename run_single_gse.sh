@@ -61,10 +61,11 @@ copy_files() {
     fi
 
     echo "Copying files from temporary to permanent storage..."
-    local TMP_GSE_DIR=$(find $TMP_DIR -type d -name "$GSE_ID" | head -n 1)
+    # Find all GSE directories in the temporary location
+    local TMP_GSE_DIRS=$(find $TMP_DIR -type d -name "$GSE_ID")
     local GSE_DIR=$SLURM_SUBMIT_DIR/${GSE_ID}
     
-    if [ -z "$TMP_GSE_DIR" ]; then
+    if [ -z "$TMP_GSE_DIRS" ]; then
         echo "Error: Could not find GSE directory in temporary location"
         return 1
     fi
@@ -72,41 +73,52 @@ copy_files() {
     # Create the proper directory structure in the permanent location
     mkdir -p $GSE_DIR/samples
     
-    # First copy the GSE directory contents (excluding samples)
-    echo "Copying GSE directory contents..."
-    if ! cp -rv "$TMP_GSE_DIR"/* "$GSE_DIR/" 2>&1; then
-        echo "Error copying GSE directory contents"
-        return 1
-    fi
-    
-    # Then copy sample directories
-    if [ -d "$TMP_GSE_DIR/samples" ]; then
-        echo "Copying sample directories..."
-        for gsm_dir in "$TMP_GSE_DIR/samples"/*; do
-            if [ -d "$gsm_dir" ]; then
-                gsm_id=$(basename "$gsm_dir")
-                echo "Copying $gsm_id to $GSE_DIR/samples/$gsm_id"
-                mkdir -p "$GSE_DIR/samples/$gsm_id"
-                
-                # Copy with verbose output and error checking
-                if ! cp -rv "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/" 2>&1; then
-                    echo "Error copying $gsm_id directory"
-                    return 1
+    # Process each GSE directory found
+    for TMP_GSE_DIR in $TMP_GSE_DIRS; do
+        echo "Processing GSE directory: $TMP_GSE_DIR"
+        
+        # Copy sample directories
+        if [ -d "$TMP_GSE_DIR/samples" ]; then
+            echo "Copying sample directories from $TMP_GSE_DIR/samples..."
+            for gsm_dir in "$TMP_GSE_DIR/samples"/*; do
+                if [ -d "$gsm_dir" ]; then
+                    gsm_id=$(basename "$gsm_dir")
+                    echo "Copying $gsm_id to $GSE_DIR/samples/$gsm_id"
+                    mkdir -p "$GSE_DIR/samples/$gsm_id"
+                    
+                    # Copy with verbose output and error checking
+                    if ! cp -rv "$gsm_dir"/* "$GSE_DIR/samples/$gsm_id/" 2>&1; then
+                        echo "Warning: Error copying $gsm_id directory, continuing with next sample"
+                        continue
+                    fi
+                    
+                    # Verify the copy
+                    if [ ! -d "$GSE_DIR/samples/$gsm_id" ]; then
+                        echo "Warning: Failed to create $gsm_id directory in permanent location, continuing with next sample"
+                        continue
+                    fi
+                    
+                    # Verify contents were copied
+                    if [ ! "$(ls -A "$GSE_DIR/samples/$gsm_id")" ]; then
+                        echo "Warning: $gsm_id directory is empty after copy, continuing with next sample"
+                        continue
+                    fi
                 fi
-                
-                # Verify the copy
-                if [ ! -d "$GSE_DIR/samples/$gsm_id" ]; then
-                    echo "Error: Failed to create $gsm_id directory in permanent location"
-                    return 1
-                fi
-            fi
-        done
-    else
-        echo "Samples directory not found in $TMP_GSE_DIR"
-        return 1
-    fi
+            done
+        else
+            echo "Warning: Samples directory not found in $TMP_GSE_DIR, continuing with next GSE directory"
+            continue
+        fi
+        
+        # Copy any other files from the GSE directory
+        echo "Copying GSE directory contents from $TMP_GSE_DIR..."
+        if ! cp -rv "$TMP_GSE_DIR"/* "$GSE_DIR/" 2>&1; then
+            echo "Warning: Error copying GSE directory contents from $TMP_GSE_DIR, continuing with next GSE directory"
+            continue
+        fi
+    done
     
-    # Verify the copy was successful
+    # Final verification of all copied files
     echo "Verifying files in permanent location:"
     if [ -d "$GSE_DIR/samples" ]; then
         echo "Contents of $GSE_DIR/samples:"
@@ -115,16 +127,17 @@ copy_files() {
         # Check each sample directory
         for gsm_dir in "$GSE_DIR/samples"/*; do
             if [ -d "$gsm_dir" ]; then
-                echo "Contents of $(basename "$gsm_dir"):"
+                gsm_id=$(basename "$gsm_dir")
+                echo "Contents of $gsm_id:"
                 ls -la "$gsm_dir"
                 if [ -d "$gsm_dir/SRA" ]; then
-                    echo "Contents of $(basename "$gsm_dir")/SRA:"
+                    echo "Contents of $gsm_id/SRA:"
                     ls -la "$gsm_dir/SRA"
                 fi
             fi
         done
     else
-        echo "Samples directory not found in permanent location"
+        echo "Error: Samples directory not found in permanent location"
         return 1
     fi
     
