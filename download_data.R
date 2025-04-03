@@ -143,24 +143,37 @@ get_srx_ids <- function(gse_id) {
   
   # Get list of GSM objects
   gsm_list <- GSMList(gse)
+  total_gsm <- length(gsm_list)
+  cat(sprintf("Found %d GSM objects to process\n", total_gsm))
   
   # Save each GSM object and extract SRX IDs
-  srx_ids <- sapply(names(gsm_list), function(gsm_name) {
+  srx_ids <- sapply(seq_along(names(gsm_list)), function(i) {
+    gsm_name <- names(gsm_list)[i]
     gsm <- gsm_list[[gsm_name]]
     
-    # Create sample directory structure
-    sample_dir <- create_sample_structure(gse_dir, gsm_name)
+    cat(sprintf("Processing GSM %d of %d: %s\n", i, total_gsm, gsm_name))
     
-    # Save GSM object
-    saveRDS(gsm, file.path(sample_dir, paste0(gsm_name, ".rds")))
-    
-    # Extract SRX ID
-    relations <- Meta(gsm)$relation
-    sra_link <- relations[grep("SRA:", relations)]
-    if (length(sra_link) > 0) {
-      return(sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link))
-    }
-    return(NA)
+    tryCatch({
+      # Create sample directory structure
+      sample_dir <- create_sample_structure(gse_dir, gsm_name)
+      
+      # Save GSM object
+      saveRDS(gsm, file.path(sample_dir, paste0(gsm_name, ".rds")))
+      
+      # Extract SRX ID
+      relations <- Meta(gsm)$relation
+      sra_link <- relations[grep("SRA:", relations)]
+      if (length(sra_link) > 0) {
+        srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+        cat(sprintf("Found SRX ID: %s\n", srx_id))
+        return(srx_id)
+      }
+      cat("No SRX ID found for this GSM\n")
+      return(NA)
+    }, error = function(e) {
+      cat(sprintf("Error processing GSM %s: %s\n", gsm_name, e$message))
+      return(NA)
+    })
   })
   
   # Remove any NA values
@@ -171,6 +184,8 @@ get_srx_ids <- function(gse_id) {
     return(NULL)
   }
   
+  cat(sprintf("Successfully processed %d GSM objects and found %d SRX IDs\n", 
+              total_gsm, length(srx_ids)))
   return(srx_ids)
 }
 
