@@ -89,39 +89,15 @@ check_disk_space <- function(path) {
 
 # Function to determine the appropriate base directory
 get_base_dir <- function() {
-  # First check if we're running in SLURM
+  # Check if we're running in SLURM
   if (Sys.getenv("SLURM_TMPDIR") != "") {
     return(Sys.getenv("SLURM_TMPDIR"))
   }
   
-  # If not in SLURM, try to use the current working directory
+  # When running manually, always use current directory
   current_dir <- getwd()
-  
-  # Check if we have write permissions in the current directory
-  test_file <- file.path(current_dir, ".test_write")
-  if (file.create(test_file)) {
-    file.remove(test_file)
-    return(current_dir)
-  }
-  
-  # Try to set write permissions on the current directory
-  tryCatch({
-    Sys.chmod(current_dir, mode = "0775", use_umask = FALSE)
-    if (file.create(test_file)) {
-      file.remove(test_file)
-      return(current_dir)
-    }
-  }, error = function(e) {
-    cat(sprintf("Warning: Could not set permissions on current directory: %s\n", e$message))
-  })
-  
-  # If we still don't have write permissions, use a temporary directory
-  temp_dir <- file.path(tempdir(), "B16F10")
-  if (!dir.exists(temp_dir)) {
-    dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
-  }
-  
-  return(temp_dir)
+  cat(sprintf("Running manually, using current directory: %s\n", current_dir))
+  return(current_dir)
 }
 
 # Function to create directory structure for a GSE ID
