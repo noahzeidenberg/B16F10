@@ -110,16 +110,29 @@ create_gse_structure <- function(gse_id) {
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
   
-  cat(sprintf("Attempting to create GSE directory: %s\n", gse_dir))
+  cat(sprintf("Checking GSE directory: %s\n", gse_dir))
   
-  # Create directory with error checking
-  if (!dir.create(gse_dir, showWarnings = TRUE, recursive = TRUE)) {
-    cat(sprintf("Directory creation failed. Checking permissions...\n"))
-    cat(sprintf("Directory exists: %s\n", dir.exists(gse_dir)))
-    cat(sprintf("Parent directory exists: %s\n", dir.exists(dirname(gse_dir))))
-    cat(sprintf("Parent directory permissions: %s\n", 
-                system(sprintf("ls -ld %s", dirname(gse_dir)), intern = TRUE)))
-    stop(sprintf("Failed to create GSE directory: %s", gse_dir))
+  # If directory exists, check if it's writable
+  if (dir.exists(gse_dir)) {
+    cat("GSE directory already exists, checking permissions...\n")
+    # Try to create a test file to check write permissions
+    test_file <- file.path(gse_dir, ".test_write")
+    if (file.create(test_file)) {
+      file.remove(test_file)
+      cat("Directory exists and is writable\n")
+    } else {
+      stop(sprintf("GSE directory exists but is not writable: %s", gse_dir))
+    }
+  } else {
+    # Create directory with error checking
+    if (!dir.create(gse_dir, showWarnings = TRUE, recursive = TRUE)) {
+      cat(sprintf("Directory creation failed. Checking permissions...\n"))
+      cat(sprintf("Parent directory exists: %s\n", dir.exists(dirname(gse_dir))))
+      cat(sprintf("Parent directory permissions: %s\n", 
+                  system(sprintf("ls -ld %s", dirname(gse_dir)), intern = TRUE)))
+      stop(sprintf("Failed to create GSE directory: %s", gse_dir))
+    }
+    cat("Created new GSE directory\n")
   }
   
   # Create subdirectories
@@ -129,12 +142,17 @@ create_gse_structure <- function(gse_id) {
   )
   
   for (dir in dirs) {
-    if (!dir.create(dir, showWarnings = TRUE, recursive = TRUE)) {
-      stop(sprintf("Failed to create directory: %s", dir))
+    if (!dir.exists(dir)) {
+      if (!dir.create(dir, showWarnings = TRUE, recursive = TRUE)) {
+        stop(sprintf("Failed to create directory: %s", dir))
+      }
+      cat(sprintf("Created directory: %s\n", dir))
+    } else {
+      cat(sprintf("Directory already exists: %s\n", dir))
     }
   }
   
-  cat(sprintf("Created directory structure at: %s\n", gse_dir))
+  cat(sprintf("Directory structure ready at: %s\n", gse_dir))
   return(gse_dir)
 }
 
