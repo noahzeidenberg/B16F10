@@ -342,10 +342,24 @@ get_srx_ids <- function(gse_id) {
       
       # Get list of GSM objects and filter out GPL
       gsm_list <- GSMList(gse)
-      # Filter out any GPL entries
+      
+      # Log all entities found
+      cat(sprintf("Found %d total entities in GEO object\n", length(gsm_list)))
+      cat("Entity types found:\n")
+      entity_types <- table(gsub("^([A-Z]+).*", "\\1", names(gsm_list)))
+      for (type in names(entity_types)) {
+        cat(sprintf("  %s: %d\n", type, entity_types[type]))
+      }
+      
+      # Filter out any non-GSM entries (GPL, GDS, etc.)
       gsm_list <- gsm_list[grep("^GSM", names(gsm_list))]
       total_gsm <- length(gsm_list)
-      cat(sprintf("Found %d GSM samples to process\n", total_gsm))
+      cat(sprintf("Found %d GSM samples to process after filtering\n", total_gsm))
+      
+      if (total_gsm == 0) {
+        cat("No GSM samples found after filtering. Skipping...\n")
+        return(NULL)
+      }
       
       # Save each GSM object and extract SRX IDs
       srx_ids <- sapply(seq_along(names(gsm_list)), function(i) {
@@ -577,6 +591,10 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
     stop("fasterq-dump command not found. Please ensure SRA toolkit is installed and in PATH")
   }
   
+  if (!check_command("pigz")) {
+    stop("pigz command not found. Please ensure pigz is installed and in PATH")
+  }
+  
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
   
@@ -601,7 +619,7 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
       }
       
       if (file.exists(sra_file)) {
-        cat(sprintf("Converting SRA %s to compressed FASTQ in %s\n", sra_id, fastq_dir))
+        cat(sprintf("Converting SRA %s to FASTQ in %s\n", sra_id, fastq_dir))
         dir.create(fastq_dir, recursive = TRUE, showWarnings = FALSE)
         
         # Convert with timeout and retry logic
@@ -612,19 +630,51 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
             Sys.sleep(30 * retry)
           }
           
-          # Use --gzip to directly create compressed FASTQ files
-          cmd <- sprintf('timeout 3600 fasterq-dump --split-files --gzip --progress --threads %d --outdir %s %s 2>&1',
+          # First use fasterq-dump to create uncompressed FASTQ files
+          cmd <- sprintf('timeout 3600 fasterq-dump --split-files --progress --threads %d --outdir %s %s 2>&1',
                         threads, fastq_dir, sra_id)
           result <- system(cmd, intern = TRUE)
           cat("fasterq-dump output:\n", paste(result, collapse = "\n"), "\n")
           
-          # Check for success - look for .fastq.gz files
-          fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
+          # Check for uncompressed FASTQ files
+          fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
           if (length(fastq_files) > 0) {
-            cat(sprintf("Successfully created compressed FASTQ files: %s\n", 
-                       paste(basename(fastq_files), collapse = ", ")))
-            converted_sra_ids <- c(converted_sra_ids, sra_id)
-            break
+            cat(sprintf("Successfully created FASTQ files, now compressing with pigz...\n"))
+            
+            # Compress each FASTQ file with pigz
+            for (fastq_file in fastq_files) {
+              cat(sprintf("Compressing %s with pigz...\n", basename(fastq_file)))
+              compress_cmd <- sprintf('pigz -p %d %s', threads, fastq_file)
+              compress_result <- system(compress_cmd, intern = TRUE)
+              if (length(compress_result) > 0) {
+                cat("pigz output:\n", paste(compress_result, collapse = "\n"), "\n")
+              }
+            }
+            
+            # Verify compressed files exist
+            compressed_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
+            if (length(compressed_files) > 0) {
+              cat(sprintf("Successfully created compressed FASTQ files: %s\n", 
+                         paste(basename(compressed_files), collapse = ", ")))
+              
+              # Clean up uncompressed files
+              uncompressed_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
+              if (length(uncompressed_files) > 0) {
+                cat("Cleaning up uncompressed FASTQ files...\n")
+                for (file in uncompressed_files) {
+                  if (file.remove(file)) {
+                    cat(sprintf("Removed uncompressed file: %s\n", basename(file)))
+                  } else {
+                    warning(sprintf("Failed to remove uncompressed file: %s", basename(file)))
+                  }
+                }
+              }
+              
+              converted_sra_ids <- c(converted_sra_ids, sra_id)
+              break
+            } else {
+              warning(sprintf("Failed to compress FASTQ files for SRA %s", sra_id))
+            }
           } else if (retry == max_retries) {
             warning(sprintf("Failed to convert SRA file after %d attempts: %s", max_retries, sra_id))
           }
@@ -708,7 +758,12 @@ main <- function(gse_id = NULL) {
     cat(sprintf("Getting SRX IDs for %s...\n", gse_id))
     srx_ids <- get_srx_ids(gse_id)
     if (is.null(srx_ids)) {
-      stop(sprintf("Failed to get SRX IDs for %s", gse_id))
+      cat(sprintf("No valid GSM samples found for %s. This could be because:\n", gse_id))
+      cat("  1. The dataset is not high-throughput sequencing data\n")
+      cat("  2. The dataset contains only GPL (platform) entries\n")
+      cat("  3. The dataset structure is not as expected\n")
+      cat("Please check the dataset manually or try a different GSE ID.\n")
+      return(invisible(NULL))
     }
     
     # Convert SRX to SRA IDs
