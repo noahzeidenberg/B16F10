@@ -154,7 +154,7 @@ fi
 
 # Run the R script
 echo "=== Starting R script execution ==="
-Rscript process_rnaseq.R $GSE_ID
+Rscript scripts/process_rnaseq.R $GSE_ID
 R_EXIT_CODE=$?
 echo "R script exit code: $R_EXIT_CODE"
 
