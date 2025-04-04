@@ -329,7 +329,8 @@ get_srx_ids <- function(gse_id) {
       }
       
       # Try to get the GEO object with rate limiting
-      gse <- make_api_request(getGEO, gse_id, GSEMatrix = FALSE)
+      # Set getGPL=FALSE to prevent downloading and including GPL information
+      gse <- make_api_request(getGEO, gse_id, GSEMatrix = FALSE, getGPL = FALSE)
       success <- TRUE
       
       # Check if this is HTS data
