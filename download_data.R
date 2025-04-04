@@ -299,6 +299,8 @@ get_srx_ids <- function(gse_id) {
       
       # Get list of GSM objects and filter out GPL
       gsm_list <- GSMList(gse)
+      # Filter out any GPL entries
+      gsm_list <- gsm_list[grep("^GSM", names(gsm_list))]
       total_gsm <- length(gsm_list)
       cat(sprintf("Found %d GSM samples to process\n", total_gsm))
       
