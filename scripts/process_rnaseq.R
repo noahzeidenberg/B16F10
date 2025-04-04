@@ -23,6 +23,19 @@ for (pkg in required_packages) {
   library(pkg, character.only = TRUE)
 }
 
+# Function to check if a FASTQ file is corrupted
+is_fastq_corrupted <- function(fastq_file) {
+  # Try to read the first few lines of the file
+  tryCatch({
+    cmd <- sprintf("zcat %s | head -n 4", fastq_file)
+    result <- system(cmd, intern = TRUE)
+    # Check if we got 4 lines (a complete FASTQ record)
+    return(length(result) != 4)
+  }, error = function(e) {
+    return(TRUE)
+  })
+}
+
 # Function to run FastQC
 run_fastqc <- function(fastq_dir, output_dir) {
   cat(sprintf("Running FastQC on directory: %s\n", fastq_dir))
@@ -102,6 +115,12 @@ run_star_alignment <- function(input_dir, genome_dir, output_dir) {
       next
     }
     
+    # Check if the FASTQ files are corrupted
+    if (is_fastq_corrupted(r1_file) || is_fastq_corrupted(r2_file)) {
+      cat(sprintf("Skipping %s - FASTQ file is corrupted\n", r1_file))
+      next
+    }
+    
     sample_name <- basename(sub("_1.trimmed.fastq.gz$", "", r1_file))
     out_prefix <- file.path(output_dir, sample_name)
     
@@ -121,9 +140,25 @@ run_feature_counts <- function(bam_dir, gtf_file, output_file) {
   bam_files <- list.files(bam_dir, pattern = "Aligned.sortedByCoord.out.bam$", full.names = TRUE)
   cat(sprintf("Found %d BAM files to process\n", length(bam_files)))
   
+  # Check if any BAM files are valid
+  valid_bam_files <- c()
+  for (bam_file in bam_files) {
+    # Check if the BAM file exists and is not empty
+    if (file.exists(bam_file) && file.size(bam_file) > 0) {
+      valid_bam_files <- c(valid_bam_files, bam_file)
+    } else {
+      cat(sprintf("Skipping %s - BAM file is invalid or empty\n", bam_file))
+    }
+  }
+  
+  if (length(valid_bam_files) == 0) {
+    cat("No valid BAM files found, skipping featureCounts\n")
+    return(NULL)
+  }
+  
   # Run featureCounts
   cat("Starting featureCounts analysis...\n")
-  fc <- featureCounts(bam_files,
+  fc <- featureCounts(valid_bam_files,
                      annot.ext = gtf_file,
                      isGTFAnnotationFile = TRUE,
                      GTF.featureType = "gene",
@@ -294,10 +329,34 @@ main <- function(gse_id = NULL) {
     if (length(bam_files) > 0) {
       cat("Found alignment files, skipping alignment\n")
     } else {
-      # Check if trimmed files exist
+      # Check if trimmed files exist and are valid
       trimmed_files <- list.files(trimmed_dir, pattern = "\\.trimmed\\.fastq\\.gz$", full.names = TRUE)
       if (length(trimmed_files) > 0) {
-        cat("Found trimmed files, skipping trimming\n")
+        # Check if any trimmed files are corrupted
+        corrupted_files <- FALSE
+        for (file in trimmed_files) {
+          if (is_fastq_corrupted(file)) {
+            cat(sprintf("Found corrupted file: %s, will re-run trimming\n", file))
+            corrupted_files <- TRUE
+            break
+          }
+        }
+        
+        if (!corrupted_files) {
+          cat("Found valid trimmed files, skipping trimming\n")
+        } else {
+          # Re-run trimming
+          cat("Re-running trimming due to corrupted files\n")
+          sample_dirs <- list.dirs(file.path(getwd(), gse_id, "samples"), recursive = FALSE)
+          for (sample_dir in sample_dirs) {
+            fastq_dir <- file.path(sample_dir, "SRA", "FASTQ")
+            if (!dir.exists(fastq_dir)) {
+              cat(sprintf("Skipping %s - FASTQ directory not found\n", sample_dir))
+              next
+            }
+            run_fastp(fastq_dir, trimmed_dir)
+          }
+        }
       } else {
         # Check if FastQC results exist
         fastqc_files <- list.files(fastqc_dir, pattern = "\\.html$", full.names = TRUE)
@@ -350,6 +409,12 @@ main <- function(gse_id = NULL) {
       ref_gff,
       file.path(counts_dir, "feature_counts.rds")
     )
+    
+    # Check if featureCounts was successful
+    if (is.null(counts)) {
+      cat("featureCounts failed, cannot proceed with normalization\n")
+      return(1)
+    }
   }
   
   # Get batch information
