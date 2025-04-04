@@ -17,9 +17,6 @@ tryCatch({
   if (!check_command("prefetch") || !check_command("fasterq-dump")) {
     stop("Required commands not found. Please ensure sra-toolkit is loaded in the SLURM script.")
   }
-  if (!check_command("pigz")) {
-    stop("pigz command not found. Please ensure pigz is loaded in the SLURM script.")
-  }
 }, error = function(e) {
   cat("Error verifying commands:", conditionMessage(e), "\n")
   cat("Please ensure the required modules are loaded in the SLURM script.\n")
@@ -583,14 +580,28 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
   
+  # Track which SRA IDs have been successfully converted
+  converted_sra_ids <- c()
+  
   for (sra_id in sra_ids) {
     gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
     for (gsm_dir in gsm_dirs) {
       sra_file <- file.path(gsm_dir, "SRA", sra_id, paste0(sra_id, ".sra"))
       fastq_dir <- file.path(gsm_dir, "SRA", "FASTQ")
       
+      # Check if FASTQ files already exist for this SRA ID
+      if (dir.exists(fastq_dir)) {
+        existing_fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
+        if (length(existing_fastq_files) > 0) {
+          cat(sprintf("FASTQ files already exist for SRA %s in %s. Skipping conversion.\n", 
+                     sra_id, fastq_dir))
+          converted_sra_ids <- c(converted_sra_ids, sra_id)
+          break
+        }
+      }
+      
       if (file.exists(sra_file)) {
-        cat(sprintf("Converting SRA %s to FASTQ in %s\n", sra_id, fastq_dir))
+        cat(sprintf("Converting SRA %s to compressed FASTQ in %s\n", sra_id, fastq_dir))
         dir.create(fastq_dir, recursive = TRUE, showWarnings = FALSE)
         
         # Convert with timeout and retry logic
@@ -601,26 +612,36 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
             Sys.sleep(30 * retry)
           }
           
-          cmd <- sprintf('timeout 3600 fasterq-dump --split-files --progress --threads %d --outdir %s %s 2>&1',
+          # Use --gzip to directly create compressed FASTQ files
+          cmd <- sprintf('timeout 3600 fasterq-dump --split-files --gzip --progress --threads %d --outdir %s %s 2>&1',
                         threads, fastq_dir, sra_id)
           result <- system(cmd, intern = TRUE)
           cat("fasterq-dump output:\n", paste(result, collapse = "\n"), "\n")
           
-          # Check for success
-          fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
+          # Check for success - look for .fastq.gz files
+          fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
           if (length(fastq_files) > 0) {
-            cat(sprintf("Successfully created FASTQ files: %s\n", 
+            cat(sprintf("Successfully created compressed FASTQ files: %s\n", 
                        paste(basename(fastq_files), collapse = ", ")))
-            # Compress FASTQ files
-            for (fastq_file in fastq_files) {
-              system(sprintf("pigz -p %d %s", threads, fastq_file))
-            }
+            converted_sra_ids <- c(converted_sra_ids, sra_id)
             break
           } else if (retry == max_retries) {
             warning(sprintf("Failed to convert SRA file after %d attempts: %s", max_retries, sra_id))
           }
         }
       }
+    }
+  }
+  
+  # Report on conversion status
+  if (length(converted_sra_ids) == length(sra_ids)) {
+    cat("All SRA files have been successfully converted to FASTQ.\n")
+  } else {
+    cat(sprintf("Converted %d out of %d SRA files to FASTQ.\n", 
+                length(converted_sra_ids), length(sra_ids)))
+    cat("The following SRA files were not converted:\n")
+    for (sra_id in setdiff(sra_ids, converted_sra_ids)) {
+      cat(sprintf("  - %s\n", sra_id))
     }
   }
 }
@@ -680,8 +701,7 @@ main <- function(gse_id = NULL) {
     
     # Check if FASTQ files already exist
     if (check_fastq_files(gse_id)) {
-      cat(sprintf("FASTQ files already exist for %s. Skipping download and conversion.\n", gse_id))
-      return(0)
+      cat(sprintf("Some FASTQ files already exist for %s. Will check each SRA ID individually.\n", gse_id))
     }
     
     # Get SRX IDs
