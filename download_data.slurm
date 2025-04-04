@@ -46,6 +46,16 @@ if [ "$USE_TMPDIR" = "0" ]; then
     echo "Using permanent directory for downloads"
     cd $SUBMIT_DIR
     WORK_DIR=$SUBMIT_DIR
+    
+    # Ensure the GSE directory exists and has proper permissions
+    GSE_DIR=$SUBMIT_DIR/${GSE_ID}
+    echo "Ensuring GSE directory exists: $GSE_DIR"
+    mkdir -p $GSE_DIR/samples
+    chmod -R 755 $GSE_DIR
+    echo "GSE directory permissions:"
+    ls -ld $GSE_DIR
+    echo "Samples directory permissions:"
+    ls -ld $GSE_DIR/samples
 else
     echo "Using temporary directory for downloads"
     # Create a temporary directory for this job
@@ -59,6 +69,12 @@ else
         ls -la $TMP_DIR
         exit 1
     fi
+    
+    # Set proper permissions
+    chmod -R 755 $WORK_DIR
+    echo "WORK_DIR permissions:"
+    ls -ld $WORK_DIR
+    
     cd $WORK_DIR
 
     # Copy the R script and .env file to the temporary directory
@@ -67,6 +83,16 @@ else
         echo "Error: Failed to copy required files to WORK_DIR"
         exit 1
     fi
+    
+    # Create the GSE directory structure in the temporary location
+    GSE_DIR=$WORK_DIR/${GSE_ID}
+    echo "Creating GSE directory structure in temporary location: $GSE_DIR"
+    mkdir -p $GSE_DIR/samples
+    chmod -R 755 $GSE_DIR
+    echo "Temporary GSE directory permissions:"
+    ls -ld $GSE_DIR
+    echo "Temporary samples directory permissions:"
+    ls -ld $GSE_DIR/samples
 fi
 
 # Function to copy files from temporary to permanent storage
@@ -96,6 +122,13 @@ copy_files() {
         return 1
     fi
     
+    # Set proper permissions
+    chmod -R 755 $GSE_DIR
+    echo "GSE_DIR permissions:"
+    ls -ld $GSE_DIR
+    echo "Samples directory permissions:"
+    ls -ld $GSE_DIR/samples
+    
     # Copy sample directories
     if [ -d "samples" ]; then
         echo "Copying sample directories from $WORK_DIR/samples..."
@@ -114,6 +147,9 @@ copy_files() {
                     echo "Error: Failed to create destination directory for $gsm_id"
                     continue
                 fi
+                
+                # Set proper permissions
+                chmod -R 755 "$GSE_DIR/samples/$gsm_id"
                 
                 # Copy with verbose output and error checking
                 echo "Starting copy operation..."

@@ -171,9 +171,46 @@ create_sample_structure <- function(gse_dir, gsm_id) {
   # Create sample directory
   sample_dir <- file.path(gse_dir, "samples", gsm_id)
   
-  # Create directory with error checking
-  if (!dir.create(sample_dir, showWarnings = FALSE, recursive = TRUE)) {
-    stop(sprintf("Failed to create sample directory: %s", sample_dir))
+  cat(sprintf("Attempting to create sample directory: %s\n", sample_dir))
+  
+  # Check if parent directory exists and is writable
+  parent_dir <- dirname(sample_dir)
+  if (!dir.exists(parent_dir)) {
+    cat(sprintf("Parent directory does not exist: %s\n", parent_dir))
+    cat("Attempting to create parent directory...\n")
+    if (!dir.create(parent_dir, showWarnings = TRUE, recursive = TRUE)) {
+      cat(sprintf("Failed to create parent directory: %s\n", parent_dir))
+      cat("Parent directory permissions:\n")
+      system(sprintf("ls -ld %s", dirname(parent_dir)), intern = TRUE) |> cat(sep = "\n")
+      stop(sprintf("Failed to create parent directory: %s", parent_dir))
+    }
+    cat("Successfully created parent directory\n")
+  }
+  
+  # Check if parent directory is writable
+  test_file <- file.path(parent_dir, ".test_write")
+  if (!file.create(test_file)) {
+    cat(sprintf("Parent directory is not writable: %s\n", parent_dir))
+    cat("Parent directory permissions:\n")
+    system(sprintf("ls -ld %s", parent_dir), intern = TRUE) |> cat(sep = "\n")
+    stop(sprintf("Parent directory is not writable: %s", parent_dir))
+  }
+  file.remove(test_file)
+  cat("Parent directory is writable\n")
+  
+  # Create sample directory with error checking
+  if (!dir.exists(sample_dir)) {
+    cat("Creating sample directory...\n")
+    if (!dir.create(sample_dir, showWarnings = TRUE, recursive = TRUE)) {
+      cat(sprintf("Failed to create sample directory: %s\n", sample_dir))
+      cat("Current directory permissions:\n")
+      system("pwd", intern = TRUE) |> cat(sep = "\n")
+      system("ls -la", intern = TRUE) |> cat(sep = "\n")
+      stop(sprintf("Failed to create sample directory: %s", sample_dir))
+    }
+    cat("Successfully created sample directory\n")
+  } else {
+    cat("Sample directory already exists\n")
   }
   
   # Create subdirectories
@@ -183,8 +220,17 @@ create_sample_structure <- function(gse_dir, gsm_id) {
   )
   
   for (dir in dirs) {
-    if (!dir.create(dir, showWarnings = FALSE, recursive = TRUE)) {
-      stop(sprintf("Failed to create directory: %s", dir))
+    if (!dir.exists(dir)) {
+      cat(sprintf("Creating directory: %s\n", dir))
+      if (!dir.create(dir, showWarnings = TRUE, recursive = TRUE)) {
+        cat(sprintf("Failed to create directory: %s\n", dir))
+        cat("Parent directory permissions:\n")
+        system(sprintf("ls -ld %s", dirname(dir)), intern = TRUE) |> cat(sep = "\n")
+        stop(sprintf("Failed to create directory: %s", dir))
+      }
+      cat(sprintf("Successfully created directory: %s\n", dir))
+    } else {
+      cat(sprintf("Directory already exists: %s\n", dir))
     }
   }
   
@@ -336,6 +382,13 @@ get_srx_ids <- function(gse_id) {
           return(NA)
         }, error = function(e) {
           cat(sprintf("Error processing GSM %s: %s\n", gsm_name, e$message))
+          # Print additional debugging information
+          cat("Current working directory:\n")
+          system("pwd", intern = TRUE) |> cat(sep = "\n")
+          cat("Directory contents:\n")
+          system("ls -la", intern = TRUE) |> cat(sep = "\n")
+          cat("Samples directory contents:\n")
+          system(sprintf("ls -la %s/samples", gse_dir), intern = TRUE) |> cat(sep = "\n")
           return(NA)
         })
       })
@@ -615,6 +668,16 @@ main <- function(gse_id = NULL) {
     base_dir <- get_base_dir()
     cat(sprintf("Using base directory: %s\n", base_dir))
     
+    # Print environment information
+    cat("=== Environment Information ===\n")
+    cat("Current working directory:\n")
+    system("pwd", intern = TRUE) |> cat(sep = "\n")
+    cat("Directory contents:\n")
+    system("ls -la", intern = TRUE) |> cat(sep = "\n")
+    cat("User and permissions:\n")
+    system("id", intern = TRUE) |> cat(sep = "\n")
+    cat("=== End Environment Information ===\n")
+    
     # Check if FASTQ files already exist
     if (check_fastq_files(gse_id)) {
       cat(sprintf("FASTQ files already exist for %s. Skipping download and conversion.\n", gse_id))
@@ -644,6 +707,15 @@ main <- function(gse_id = NULL) {
     
     cat("Download and conversion complete!\n")
   }, error = function(e) {
+    cat(sprintf("Error during download process: %s\n", e$message))
+    cat("=== Error Details ===\n")
+    cat("Current working directory:\n")
+    system("pwd", intern = TRUE) |> cat(sep = "\n")
+    cat("Directory contents:\n")
+    system("ls -la", intern = TRUE) |> cat(sep = "\n")
+    cat("User and permissions:\n")
+    system("id", intern = TRUE) |> cat(sep = "\n")
+    cat("=== End Error Details ===\n")
     stop(sprintf("Error during download process: %s", e$message))
   })
 }
