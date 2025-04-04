@@ -126,44 +126,11 @@ check_output_files() {
     
     # Check for normalized counts file (final output)
     if [ -f "$GSE_DIR/counts/normalized_counts.rds" ]; then
-        echo "Found normalized counts file, skipping processing"
+        echo "Found normalized counts file, skipping all processing"
         return 0
     fi
     
-    # Check for feature counts file
-    if [ -f "$GSE_DIR/counts/feature_counts.rds" ]; then
-        echo "Found feature counts file, skipping processing"
-        return 0
-    fi
-    
-    # Check for alignment files
-    if [ -d "$GSE_DIR/alignment" ]; then
-        bam_files=$(find "$GSE_DIR/alignment" -name "*Aligned.sortedByCoord.out.bam" | wc -l)
-        if [ "$bam_files" -gt 0 ]; then
-            echo "Found alignment files, skipping processing"
-            return 0
-        fi
-    fi
-    
-    # Check for trimmed files
-    if [ -d "$GSE_DIR/trimmed" ]; then
-        trimmed_files=$(find "$GSE_DIR/trimmed" -name "*.trimmed.fastq.gz" | wc -l)
-        if [ "$trimmed_files" -gt 0 ]; then
-            echo "Found trimmed files, skipping processing"
-            return 0
-        fi
-    fi
-    
-    # Check for FastQC results
-    if [ -d "$GSE_DIR/fastqc" ]; then
-        fastqc_files=$(find "$GSE_DIR/fastqc" -name "*.html" | wc -l)
-        if [ "$fastqc_files" -gt 0 ]; then
-            echo "Found FastQC results, skipping processing"
-            return 0
-        fi
-    fi
-    
-    echo "No existing output files found, proceeding with processing"
+    echo "No final output file found, proceeding with processing"
     return 1
 }
 

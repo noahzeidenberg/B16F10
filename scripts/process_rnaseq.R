@@ -171,6 +171,26 @@ normalize_counts <- function(counts, batch_info, output_file) {
   return(results)
 }
 
+# Function to check if final output files exist
+check_final_output_files <- function(gse_id) {
+  base_dir <- file.path(getwd(), gse_id, "results")
+  
+  # Check for normalized counts file (final output)
+  if (file.exists(file.path(base_dir, "counts", "normalized_counts.rds"))) {
+    cat("Found normalized counts file, skipping processing\n")
+    return(TRUE)
+  }
+  
+  # Check for feature counts file
+  if (file.exists(file.path(base_dir, "counts", "feature_counts.rds"))) {
+    cat("Found feature counts file, skipping processing\n")
+    return(TRUE)
+  }
+  
+  cat("No final output files found, proceeding with processing\n")
+  return(FALSE)
+}
+
 # Function to check if output files exist
 check_output_files <- function(gse_id) {
   base_dir <- file.path(getwd(), gse_id, "results")
@@ -234,11 +254,6 @@ main <- function(gse_id = NULL) {
   
   cat(sprintf("Processing GSE ID: %s\n", gse_id))
   
-  # Check for existing output files
-  if (check_output_files(gse_id)) {
-    return(0)
-  }
-  
   # Set up directories
   base_dir <- file.path(getwd(), gse_id, "results")
   fastqc_dir <- file.path(base_dir, "fastqc")
@@ -263,44 +278,79 @@ main <- function(gse_id = NULL) {
   dirs <- c(fastqc_dir, trimmed_dir, star_index_dir, alignment_dir, counts_dir)
   sapply(dirs, dir.create, showWarnings = FALSE, recursive = TRUE)
   
-  # Process each sample
-  sample_dirs <- list.dirs(file.path(getwd(), gse_id, "samples"), recursive = FALSE)
-  cat(sprintf("Found %d sample directories to process\n", length(sample_dirs)))
+  # Check if normalized counts exist (final output)
+  if (file.exists(file.path(counts_dir, "normalized_counts.rds"))) {
+    cat("Found normalized counts file, skipping all processing\n")
+    return(0)
+  }
   
-  for (sample_dir in sample_dirs) {
-    fastq_dir <- file.path(sample_dir, "SRA", "FASTQ")
-    if (!dir.exists(fastq_dir)) {
-      cat(sprintf("Skipping %s - FASTQ directory not found\n", sample_dir))
-      next
+  # Check if feature counts exist
+  if (file.exists(file.path(counts_dir, "feature_counts.rds"))) {
+    cat("Found feature counts file, skipping alignment and counting\n")
+    counts <- readRDS(file.path(counts_dir, "feature_counts.rds"))
+  } else {
+    # Check if alignment files exist
+    bam_files <- list.files(alignment_dir, pattern = "Aligned.sortedByCoord.out.bam$", full.names = TRUE)
+    if (length(bam_files) > 0) {
+      cat("Found alignment files, skipping alignment\n")
+    } else {
+      # Check if trimmed files exist
+      trimmed_files <- list.files(trimmed_dir, pattern = "\\.trimmed\\.fastq\\.gz$", full.names = TRUE)
+      if (length(trimmed_files) > 0) {
+        cat("Found trimmed files, skipping trimming\n")
+      } else {
+        # Check if FastQC results exist
+        fastqc_files <- list.files(fastqc_dir, pattern = "\\.html$", full.names = TRUE)
+        if (length(fastqc_files) > 0) {
+          cat("Found FastQC results, skipping FastQC\n")
+        } else {
+          # Run FastQC on raw data
+          cat("Running FastQC on raw data...\n")
+          sample_dirs <- list.dirs(file.path(getwd(), gse_id, "samples"), recursive = FALSE)
+          for (sample_dir in sample_dirs) {
+            fastq_dir <- file.path(sample_dir, "SRA", "FASTQ")
+            if (!dir.exists(fastq_dir)) {
+              cat(sprintf("Skipping %s - FASTQ directory not found\n", sample_dir))
+              next
+            }
+            run_fastqc(fastq_dir, fastqc_dir)
+          }
+        }
+        
+        # Run fastp
+        cat("Running fastp...\n")
+        sample_dirs <- list.dirs(file.path(getwd(), gse_id, "samples"), recursive = FALSE)
+        for (sample_dir in sample_dirs) {
+          fastq_dir <- file.path(sample_dir, "SRA", "FASTQ")
+          if (!dir.exists(fastq_dir)) {
+            cat(sprintf("Skipping %s - FASTQ directory not found\n", sample_dir))
+            next
+          }
+          run_fastp(fastq_dir, trimmed_dir)
+        }
+      }
+      
+      # Build STAR index if not already built
+      if (!file.exists(file.path(star_index_dir, "Genome"))) {
+        cat("Building STAR index...\n")
+        build_star_index(ref_fasta, ref_gff, star_index_dir)
+      } else {
+        cat("Using existing STAR index\n")
+      }
+      
+      # Run STAR alignment
+      cat("Running STAR alignment...\n")
+      run_star_alignment(trimmed_dir, star_index_dir, alignment_dir)
     }
     
-    cat(sprintf("Processing sample directory: %s\n", sample_dir))
-    
-    # Run FastQC on raw data
-    run_fastqc(fastq_dir, fastqc_dir)
-    
-    # Run fastp
-    run_fastp(fastq_dir, trimmed_dir)
+    # Run featureCounts
+    cat("Starting featureCounts analysis...\n")
+    counts <- run_feature_counts(
+      alignment_dir,
+      ref_gff,
+      file.path(counts_dir, "feature_counts.rds")
+    )
   }
-  
-  # Build STAR index if not already built
-  if (!file.exists(file.path(star_index_dir, "Genome"))) {
-    cat("Building STAR index...\n")
-    build_star_index(ref_fasta, ref_gff, star_index_dir)
-  } else {
-    cat("Using existing STAR index\n")
-  }
-  
-  # Run STAR alignment
-  run_star_alignment(trimmed_dir, star_index_dir, alignment_dir)
-  
-  # Run featureCounts
-  cat("Starting featureCounts analysis...\n")
-  counts <- run_feature_counts(
-    alignment_dir,
-    ref_gff,
-    file.path(counts_dir, "feature_counts.rds")
-  )
   
   # Get batch information
   cat("Preparing batch information...\n")
