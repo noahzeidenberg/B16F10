@@ -133,7 +133,7 @@ check_output_files() {
     if [ -f "$GSE_DIR/counts/feature_counts.rds" ]; then
         echo "Found feature counts file, skipping processing"
         return 0
-    }
+    fi
     
     # Check for alignment files
     if [ -d "$GSE_DIR/alignment" ]; then
@@ -142,7 +142,7 @@ check_output_files() {
             echo "Found alignment files, skipping processing"
             return 0
         fi
-    }
+    fi
     
     # Check for trimmed files
     if [ -d "$GSE_DIR/trimmed" ]; then
@@ -151,7 +151,7 @@ check_output_files() {
             echo "Found trimmed files, skipping processing"
             return 0
         fi
-    }
+    fi
     
     # Check for FastQC results
     if [ -d "$GSE_DIR/fastqc" ]; then
@@ -160,7 +160,7 @@ check_output_files() {
             echo "Found FastQC results, skipping processing"
             return 0
         fi
-    }
+    fi
     
     echo "No existing output files found, proceeding with processing"
     return 1
