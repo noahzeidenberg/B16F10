@@ -340,24 +340,18 @@ get_srx_ids <- function(gse_id) {
         return(NULL)
       }
       
-      # Get list of GSM objects and filter out GPL
-      gsm_list <- GSMList(gse)
-      
-      # Log all entities found
-      cat(sprintf("Found %d total entities in GEO object\n", length(gsm_list)))
-      cat("Entity types found:\n")
-      entity_types <- table(gsub("^([A-Z]+).*", "\\1", names(gsm_list)))
-      for (type in names(entity_types)) {
-        cat(sprintf("  %s: %d\n", type, entity_types[type]))
-      }
+      # Get list of all entities
+      all_entities <- GSMList(gse)
       
       # Filter out any non-GSM entries (GPL, GDS, etc.)
-      gsm_list <- gsm_list[grep("^GSM", names(gsm_list))]
+      gsm_list <- all_entities[grep("^GSM", names(all_entities))]
       total_gsm <- length(gsm_list)
-      cat(sprintf("Found %d GSM samples to process after filtering\n", total_gsm))
+      
+      # Log only the GSM entities found
+      cat(sprintf("Found %d GSM samples to process\n", total_gsm))
       
       if (total_gsm == 0) {
-        cat("No GSM samples found after filtering. Skipping...\n")
+        cat("No GSM samples found. Skipping...\n")
         return(NULL)
       }
       
