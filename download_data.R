@@ -601,7 +601,7 @@ download_sra_files <- function(gse_id, sra_ids) {
           Sys.sleep(delay_time)
         }
         
-        cmd <- sprintf('prefetch --max-size 100G --progress --verify yes --resume yes --heartbeat 1 --force yes -O %s %s 2>&1', sra_id_dir, sra_id)
+        cmd <- sprintf('prefetch --max-size 100G --progress --verify yes --resume yes --heartbeat 1 --force no -O %s %s 2>&1', sra_id_dir, sra_id)
         result <- system(cmd, intern = TRUE)
         cat("prefetch output:\n", paste(result, collapse = "\n"), "\n")
         
