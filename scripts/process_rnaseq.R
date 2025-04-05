@@ -125,10 +125,26 @@ run_star_alignment <- function(input_dir, genome_dir, output_dir) {
     out_prefix <- file.path(output_dir, sample_name)
     
     cat(sprintf("Aligning sample: %s\n", sample_name))
-    cmd <- sprintf("STAR --genomeDir %s --readFilesIn %s %s --readFilesCommand zcat --outFileNamePrefix %s_ --outSAMtype BAM SortedByCoordinate --runThreadN %d",
+    
+    # Check if BAM file already exists and is valid
+    bam_file <- file.path(output_dir, paste0(sample_name, "_Aligned.sortedByCoord.out.bam"))
+    if (file.exists(bam_file) && file.size(bam_file) > 0) {
+      cat(sprintf("BAM file already exists and is valid: %s\n", bam_file))
+      next
+    }
+    
+    # Run STAR with improved parameters for paired-end reads
+    cmd <- sprintf("STAR --genomeDir %s --readFilesIn %s %s --readFilesCommand zcat --outFileNamePrefix %s_ --outSAMtype BAM SortedByCoordinate --runThreadN %d --outSAMunmapped Within --outSAMattributes Standard --outFilterMultimapNmax 20 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --outFilterMismatchNmax 999 --outFilterMismatchNoverReadLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000 --alignMatesGapMax 1000000",
                   genome_dir, r1_file, r2_file, out_prefix, parallel::detectCores() - 1)
     cat(sprintf("Executing STAR alignment command: %s\n", cmd))
     system(cmd)
+    
+    # Verify BAM file was created and is valid
+    if (!file.exists(bam_file) || file.size(bam_file) == 0) {
+      cat(sprintf("Warning: BAM file is missing or empty after alignment: %s\n", bam_file))
+    } else {
+      cat(sprintf("Successfully created BAM file: %s\n", bam_file))
+    }
   }
   cat("STAR alignment completed\n")
 }
@@ -163,6 +179,7 @@ run_feature_counts <- function(bam_dir, gtf_file, output_file) {
                      isGTFAnnotationFile = TRUE,
                      GTF.featureType = "gene",
                      GTF.attrType = "gene_id",
+                     isPairedEnd = TRUE,  # Enable paired-end mode
                      nthreads = parallel::detectCores() - 1)
   
   # Save results
@@ -302,10 +319,10 @@ main <- function(gse_id = NULL) {
   
   # Reference files
   ref_fasta <- file.path(getwd(), "mm39", "GCF_000001635.27_GRCm39_genomic.fasta")
-  ref_gff <- file.path(getwd(), "mm39", "GCF_000001635.27_GRCm39_genomic.gff")
+  ref_gtf <- file.path(getwd(), "mm39", "GCF_000001635.27_GRCm39_genomic.gtf")
   
   # Verify reference files exist
-  if (!file.exists(ref_fasta) || !file.exists(ref_gff)) {
+  if (!file.exists(ref_fasta) || !file.exists(ref_gtf)) {
     stop("Reference files not found in mm39/ directory")
   }
   
@@ -392,7 +409,7 @@ main <- function(gse_id = NULL) {
       # Build STAR index if not already built
       if (!file.exists(file.path(star_index_dir, "Genome"))) {
         cat("Building STAR index...\n")
-        build_star_index(ref_fasta, ref_gff, star_index_dir)
+        build_star_index(ref_fasta, ref_gtf, star_index_dir)
       } else {
         cat("Using existing STAR index\n")
       }
@@ -406,7 +423,7 @@ main <- function(gse_id = NULL) {
     cat("Starting featureCounts analysis...\n")
     counts <- run_feature_counts(
       alignment_dir,
-      ref_gff,
+      ref_gtf,  # Use the GTF file directly
       file.path(counts_dir, "feature_counts.rds")
     )
     
