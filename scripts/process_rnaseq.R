@@ -197,10 +197,20 @@ normalize_counts <- function(counts, batch_info, output_file) {
   counts <- counts[keep, ]
   cat(sprintf("Removed %d genes with zero counts\n", sum(!keep)))
   
-  # ComBat-seq batch correction
-  cat("Performing ComBat-seq batch correction...\n")
-  corrected_counts <- ComBat_seq(counts = as.matrix(counts),
-                                batch = batch_info$batch)
+  # Check if we have multiple batches
+  num_batches <- length(unique(batch_info$batch))
+  cat(sprintf("Number of batches: %d\n", num_batches))
+  
+  if (num_batches > 1) {
+    # ComBat-seq batch correction only if we have multiple batches
+    cat("Performing ComBat-seq batch correction...\n")
+    corrected_counts <- ComBat_seq(counts = as.matrix(counts),
+                                  batch = batch_info$batch)
+  } else {
+    # Skip batch correction if we only have one batch
+    cat("Skipping batch correction (only one batch detected)...\n")
+    corrected_counts <- as.matrix(counts)
+  }
   
   # Calculate TMM normalization factors
   cat("Calculating TMM normalization factors...\n")
@@ -436,9 +446,16 @@ main <- function(gse_id = NULL) {
   
   # Get batch information
   cat("Preparing batch information...\n")
+  
+  # Extract sample information from the counts object
+  samples <- colnames(counts$counts)
+  cat(sprintf("Found %d samples: %s\n", length(samples), paste(samples, collapse=", ")))
+  
+  # Create batch information - for now, all samples are in the same batch
+  # In a real analysis, you would define batches based on experimental design
   batch_info <- data.frame(
-    sample = colnames(counts$counts),
-    batch = factor(rep(1, ncol(counts$counts)))  # Modify this based on your batches
+    sample = samples,
+    batch = factor(rep(1, length(samples)))  # All samples in batch 1
   )
   
   # Perform normalization
