@@ -560,18 +560,44 @@ download_sra_files <- function(gse_id, sra_ids) {
             cat(sprintf("Downloading SRA %s for GSM %s\n", sra_id, gsm_id))
             dir.create(sra_dir, recursive = TRUE, showWarnings = FALSE)
             
-            # Download with prefetch
-            cmd <- sprintf('prefetch --max-size 100G -O %s %s 2>&1', sra_dir, sra_id)
-            result <- system(cmd, intern = TRUE)
-            cat("prefetch output:\n", paste(result, collapse = "\n"), "\n")
+            # Download with prefetch with retry logic
+            max_retries <- 3
+            retry_count <- 0
+            success <- FALSE
             
-            # Verify download
-            if (file.exists(sra_file) && file.info(sra_file)$size > 0) {
-              cat(sprintf("Successfully downloaded SRA file: %s (size: %.2f MB)\n", 
-                         sra_file, file.info(sra_file)$size/1024/1024))
-              break
-            } else {
-              warning(sprintf("Failed to download SRA file: %s", sra_id))
+            while (!success && retry_count < max_retries) {
+              if (retry_count > 0) {
+                delay_time <- 30 * retry_count
+                cat(sprintf("Retry %d: Waiting %d seconds before trying again...\n", 
+                           retry_count, delay_time))
+                Sys.sleep(delay_time)
+              }
+              
+              cmd <- sprintf('prefetch --max-size 100G --progress --verify yes --resume yes --heartbeat 1 --force yes -O %s %s 2>&1', sra_dir, sra_id)
+              result <- system(cmd, intern = TRUE)
+              cat("prefetch output:\n", paste(result, collapse = "\n"), "\n")
+              
+              # Check for common error patterns in output
+              if (any(grepl("error|failed|timeout|connection refused", tolower(result)))) {
+                cat("Error detected in prefetch output, will retry...\n")
+                retry_count <- retry_count + 1
+                next
+              }
+              
+              # Verify download
+              if (file.exists(sra_file) && file.info(sra_file)$size > 0) {
+                cat(sprintf("Successfully downloaded SRA file: %s (size: %.2f MB)\n", 
+                           sra_file, file.info(sra_file)$size/1024/1024))
+                success <- TRUE
+                break
+              } else {
+                warning(sprintf("Failed to download SRA file: %s", sra_id))
+                retry_count <- retry_count + 1
+              }
+            }
+            
+            if (!success) {
+              stop(sprintf("Failed to download SRA file after %d attempts: %s", max_retries, sra_id))
             }
           }
         }
@@ -581,7 +607,7 @@ download_sra_files <- function(gse_id, sra_ids) {
 }
 
 # Function to convert SRA to FASTQ
-convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
+convert_sra_to_fastq <- function(gse_id, sra_ids, threads = NULL) {
   if (!check_command("fasterq-dump")) {
     stop("fasterq-dump command not found. Please ensure SRA toolkit is installed and in PATH")
   }
@@ -590,92 +616,76 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
     stop("pigz command not found. Please ensure pigz is installed and in PATH")
   }
   
+  # Determine optimal number of threads based on available resources
+  if (is.null(threads)) {
+    # Get number of CPUs from SLURM environment variable
+    slurm_cpus <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK", "8"))
+    # Use 75% of available CPUs to leave some for system processes
+    threads <- max(1, floor(slurm_cpus * 0.75))
+    cat(sprintf("Using %d threads for fasterq-dump (from %d available CPUs)\n", 
+                threads, slurm_cpus))
+  }
+  
   base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
+  
+  # Create a temporary directory for faster I/O
+  temp_dir <- file.path(base_dir, "temp_fastq")
+  if (!dir.exists(temp_dir)) {
+    dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
+  }
   
   # Track which SRA IDs have been successfully converted
   converted_sra_ids <- c()
   
-  for (sra_id in sra_ids) {
-    gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
-    for (gsm_dir in gsm_dirs) {
-      sra_file <- file.path(gsm_dir, "SRA", sra_id, paste0(sra_id, ".sra"))
-      fastq_dir <- file.path(gsm_dir, "SRA", "FASTQ")
-      
-      # Check if FASTQ files already exist for this SRA ID
-      if (dir.exists(fastq_dir)) {
-        existing_fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
-        if (length(existing_fastq_files) > 0) {
-          cat(sprintf("FASTQ files already exist for SRA %s in %s. Skipping conversion.\n", 
-                     sra_id, fastq_dir))
-          converted_sra_ids <- c(converted_sra_ids, sra_id)
-          break
-        }
-      }
-      
-      if (file.exists(sra_file)) {
-        cat(sprintf("Converting SRA %s to FASTQ in %s\n", sra_id, fastq_dir))
-        dir.create(fastq_dir, recursive = TRUE, showWarnings = FALSE)
-        
-        # Convert with timeout and retry logic
-        max_retries <- 3
-        for (retry in 1:max_retries) {
-          if (retry > 1) {
-            cat(sprintf("Retry %d: Waiting %d seconds...\n", retry, 30 * retry))
-            Sys.sleep(30 * retry)
-          }
-          
-          # First use fasterq-dump to create uncompressed FASTQ files
-          cmd <- sprintf('timeout 3600 fasterq-dump --split-files --progress --threads %d --outdir %s %s 2>&1',
-                        threads, fastq_dir, sra_id)
-          result <- system(cmd, intern = TRUE)
-          cat("fasterq-dump output:\n", paste(result, collapse = "\n"), "\n")
-          
-          # Check for uncompressed FASTQ files
-          fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
-          if (length(fastq_files) > 0) {
-            cat(sprintf("Successfully created FASTQ files, now compressing with pigz...\n"))
-            
-            # Compress each FASTQ file with pigz
-            for (fastq_file in fastq_files) {
-              cat(sprintf("Compressing %s with pigz...\n", basename(fastq_file)))
-              compress_cmd <- sprintf('pigz -p %d %s', threads, fastq_file)
-              compress_result <- system(compress_cmd, intern = TRUE)
-              if (length(compress_result) > 0) {
-                cat("pigz output:\n", paste(compress_result, collapse = "\n"), "\n")
-              }
-            }
-            
-            # Verify compressed files exist
-            compressed_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
-            if (length(compressed_files) > 0) {
-              cat(sprintf("Successfully created compressed FASTQ files: %s\n", 
-                         paste(basename(compressed_files), collapse = ", ")))
-              
-              # Clean up uncompressed files
-              uncompressed_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
-              if (length(uncompressed_files) > 0) {
-                cat("Cleaning up uncompressed FASTQ files...\n")
-                for (file in uncompressed_files) {
-                  if (file.remove(file)) {
-                    cat(sprintf("Removed uncompressed file: %s\n", basename(file)))
-                  } else {
-                    warning(sprintf("Failed to remove uncompressed file: %s", basename(file)))
-                  }
-                }
-              }
-              
-              converted_sra_ids <- c(converted_sra_ids, sra_id)
-              break
-            } else {
-              warning(sprintf("Failed to compress FASTQ files for SRA %s", sra_id))
-            }
-          } else if (retry == max_retries) {
-            warning(sprintf("Failed to convert SRA file after %d attempts: %s", max_retries, sra_id))
-          }
-        }
+  # Process SRA files in parallel if possible
+  if (length(sra_ids) > 1 && requireNamespace("parallel", quietly = TRUE)) {
+    cat(sprintf("Processing %d SRA files in parallel...\n", length(sra_ids)))
+    
+    # Determine number of parallel processes based on available resources
+    # Use at most 4 parallel processes or 75% of available CPUs, whichever is smaller
+    slurm_cpus <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK", "8"))
+    max_parallel <- min(4, max(1, floor(slurm_cpus / 2)))
+    num_cores <- min(max_parallel, parallel::detectCores() - 1)
+    if (num_cores < 1) num_cores <- 1
+    
+    cat(sprintf("Using %d parallel processes for SRA conversion\n", num_cores))
+    
+    # Create a cluster
+    cl <- parallel::makeCluster(num_cores)
+    
+    # Export necessary variables to the cluster
+    parallel::clusterExport(cl, c("gse_dir", "temp_dir", "threads"), envir = environment())
+    
+    # Process SRA files in parallel
+    results <- parallel::parSapply(cl, sra_ids, function(sra_id) {
+      tryCatch({
+        process_single_sra(sra_id, gse_dir, temp_dir, threads)
+        return(TRUE)
+      }, error = function(e) {
+        cat(sprintf("Error processing SRA %s: %s\n", sra_id, e$message))
+        return(FALSE)
+      })
+    })
+    
+    # Stop the cluster
+    parallel::stopCluster(cl)
+    
+    # Check results
+    converted_sra_ids <- sra_ids[results]
+    
+  } else {
+    # Process SRA files sequentially
+    for (sra_id in sra_ids) {
+      if (process_single_sra(sra_id, gse_dir, temp_dir, threads)) {
+        converted_sra_ids <- c(converted_sra_ids, sra_id)
       }
     }
+  }
+  
+  # Clean up temporary directory
+  if (dir.exists(temp_dir)) {
+    unlink(temp_dir, recursive = TRUE)
   }
   
   # Report on conversion status
@@ -689,6 +699,141 @@ convert_sra_to_fastq <- function(gse_id, sra_ids, threads = 8) {
       cat(sprintf("  - %s\n", sra_id))
     }
   }
+  
+  return(converted_sra_ids)
+}
+
+# Function to process a single SRA file
+process_single_sra <- function(sra_id, gse_dir, temp_dir, threads) {
+  gsm_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
+  for (gsm_dir in gsm_dirs) {
+    sra_file <- file.path(gsm_dir, "SRA", sra_id, paste0(sra_id, ".sra"))
+    fastq_dir <- file.path(gsm_dir, "SRA", "FASTQ")
+    
+    # Check if FASTQ files already exist for this SRA ID
+    if (dir.exists(fastq_dir)) {
+      existing_fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
+      if (length(existing_fastq_files) > 0) {
+        cat(sprintf("FASTQ files already exist for SRA %s in %s. Skipping conversion.\n", 
+                   sra_id, fastq_dir))
+        return(TRUE)
+      }
+    }
+    
+    if (file.exists(sra_file)) {
+      cat(sprintf("Converting SRA %s to FASTQ in %s\n", sra_id, fastq_dir))
+      dir.create(fastq_dir, recursive = TRUE, showWarnings = FALSE)
+      
+      # Convert with timeout and retry logic
+      max_retries <- 3
+      retry_count <- 0
+      success <- FALSE
+      
+      while (!success && retry_count < max_retries) {
+        if (retry_count > 0) {
+          delay_time <- 30 * retry_count
+          cat(sprintf("Retry %d: Waiting %d seconds before trying again...\n", 
+                     retry_count, delay_time))
+          Sys.sleep(delay_time)
+        }
+        
+        # Create a temporary directory for this SRA
+        sra_temp_dir <- file.path(temp_dir, sra_id)
+        dir.create(sra_temp_dir, recursive = TRUE, showWarnings = FALSE)
+        
+        # First use fasterq-dump to create uncompressed FASTQ files with optimized settings
+        # Use more aggressive memory settings for faster processing
+        cmd <- sprintf('timeout 7200 fasterq-dump --split-files --split-spot --progress --threads %d --mem 2G --bufsize 16M --curcache 200M --disk-limit 200G --temp %s --outdir %s %s 2>&1',
+                      threads, sra_temp_dir, fastq_dir, sra_id)
+        result <- system(cmd, intern = TRUE)
+        cat("fasterq-dump output:\n", paste(result, collapse = "\n"), "\n")
+        
+        # Check for common error patterns in output
+        if (any(grepl("error|failed|timeout|connection refused|disk space", tolower(result)))) {
+          cat("Error detected in fasterq-dump output, will retry...\n")
+          retry_count <- retry_count + 1
+          next
+        }
+        
+        # Check for uncompressed FASTQ files
+        fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
+        if (length(fastq_files) > 0) {
+          cat(sprintf("Successfully created FASTQ files, now compressing with pigz...\n"))
+          
+          # Compress each FASTQ file with pigz in parallel
+          if (length(fastq_files) > 1 && requireNamespace("parallel", quietly = TRUE)) {
+            # Use parallel compression for multiple files
+            # Use all available threads for compression
+            num_cores <- min(length(fastq_files), parallel::detectCores())
+            if (num_cores < 1) num_cores <- 1
+            
+            cl <- parallel::makeCluster(num_cores)
+            parallel::clusterExport(cl, c("threads"), envir = environment())
+            
+            parallel::parSapply(cl, fastq_files, function(fastq_file) {
+              cat(sprintf("Compressing %s with pigz...\n", basename(fastq_file)))
+              compress_cmd <- sprintf('pigz -p %d %s', threads, fastq_file)
+              system(compress_cmd, intern = TRUE)
+            })
+            
+            parallel::stopCluster(cl)
+          } else {
+            # Sequential compression
+            for (fastq_file in fastq_files) {
+              cat(sprintf("Compressing %s with pigz...\n", basename(fastq_file)))
+              compress_cmd <- sprintf('pigz -p %d %s', threads, fastq_file)
+              compress_result <- system(compress_cmd, intern = TRUE)
+              if (length(compress_result) > 0) {
+                cat("pigz output:\n", paste(compress_result, collapse = "\n"), "\n")
+              }
+            }
+          }
+          
+          # Verify compressed files exist
+          compressed_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
+          if (length(compressed_files) > 0) {
+            cat(sprintf("Successfully created compressed FASTQ files: %s\n", 
+                       paste(basename(compressed_files), collapse = ", ")))
+            
+            # Clean up uncompressed files
+            uncompressed_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq$"), full.names = TRUE)
+            if (length(uncompressed_files) > 0) {
+              cat("Cleaning up uncompressed FASTQ files...\n")
+              for (file in uncompressed_files) {
+                if (file.remove(file)) {
+                  cat(sprintf("Removed uncompressed file: %s\n", basename(file)))
+                } else {
+                  warning(sprintf("Failed to remove uncompressed file: %s", basename(file)))
+                }
+              }
+            }
+            
+            # Clean up temporary directory
+            if (dir.exists(sra_temp_dir)) {
+              unlink(sra_temp_dir, recursive = TRUE)
+            }
+            
+            success <- TRUE
+            break
+          } else {
+            warning(sprintf("Failed to compress FASTQ files for SRA %s", sra_id))
+            retry_count <- retry_count + 1
+          }
+        } else {
+          warning(sprintf("No FASTQ files created for SRA %s", sra_id))
+          retry_count <- retry_count + 1
+        }
+      }
+      
+      if (!success) {
+        stop(sprintf("Failed to convert SRA file after %d attempts: %s", max_retries, sra_id))
+      }
+      
+      return(TRUE)
+    }
+  }
+  
+  return(FALSE)
 }
 
 # Function to check if FASTQ files exist for a GSE ID

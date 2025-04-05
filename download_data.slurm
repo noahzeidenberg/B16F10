@@ -1,15 +1,17 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=02:30:00
+#SBATCH --time=04:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
 #SBATCH --job-name=download_rnaseq
 #SBATCH --output=logs/download_rnaseq/download_rnaseq_%A_%a.out
 #SBATCH --error=logs/download_rnaseq/download_rnaseq_%A_%a.err
 #SBATCH --array=1-72
-#SBATCH --tmp=100G
+#SBATCH --tmp=200G
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-user=your.email@example.com
 
 # Enable debugging
 set -x
@@ -18,6 +20,7 @@ set -x
 module load sra-toolkit
 module load r
 module load gcc
+module load parallel
 
 # Set up environment
 source ~/scratch/B16F10/.venv/bin/activate
