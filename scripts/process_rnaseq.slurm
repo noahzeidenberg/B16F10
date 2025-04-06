@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=04:30:00     # 4.5 hours should be sufficient for most datasets
+#SBATCH --time=02:30:00     # 4.5 hours should be sufficient for most datasets
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16  # 16 threads for fastp and STAR
