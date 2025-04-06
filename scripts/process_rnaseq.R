@@ -10,8 +10,6 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
 
 required_packages <- c(
   "Rsubread",
-  "sva",
-  "edgeR",
   "stringr",
   "data.table"
 )
@@ -189,61 +187,11 @@ run_feature_counts <- function(bam_dir, gtf_file, output_file) {
   return(fc)
 }
 
-# Function to perform batch correction and normalization
-normalize_counts <- function(counts, batch_info, output_file) {
-  cat("Starting count normalization...\n")
-  # Remove genes with zero counts across all samples
-  keep <- rowSums(counts) > 0
-  counts <- counts[keep, ]
-  cat(sprintf("Removed %d genes with zero counts\n", sum(!keep)))
-  
-  # Check if we have multiple batches
-  num_batches <- length(unique(batch_info$batch))
-  cat(sprintf("Number of batches: %d\n", num_batches))
-  
-  if (num_batches > 1) {
-    # ComBat-seq batch correction only if we have multiple batches
-    cat("Performing ComBat-seq batch correction...\n")
-    corrected_counts <- ComBat_seq(counts = as.matrix(counts),
-                                  batch = batch_info$batch)
-  } else {
-    # Skip batch correction if we only have one batch
-    cat("Skipping batch correction (only one batch detected)...\n")
-    corrected_counts <- as.matrix(counts)
-  }
-  
-  # Calculate TMM normalization factors
-  cat("Calculating TMM normalization factors...\n")
-  y <- DGEList(counts = corrected_counts)
-  y <- calcNormFactors(y, method = "TMM")
-  
-  # Get normalized counts (GeTMM)
-  cat("Computing normalized counts...\n")
-  norm_counts <- cpm(y, log = TRUE)
-  
-  # Save results
-  cat(sprintf("Saving normalized counts to: %s\n", output_file))
-  results <- list(
-    raw_counts = counts,
-    corrected_counts = corrected_counts,
-    normalized_counts = norm_counts
-  )
-  saveRDS(results, output_file)
-  cat("Normalization completed\n")
-  return(results)
-}
-
 # Function to check if final output files exist
 check_final_output_files <- function(gse_id) {
   base_dir <- file.path(getwd(), gse_id, "results")
   
-  # Check for normalized counts file (final output)
-  if (file.exists(file.path(base_dir, "counts", "normalized_counts.rds"))) {
-    cat("Found normalized counts file, skipping processing\n")
-    return(TRUE)
-  }
-  
-  # Check for feature counts file
+  # Check for feature counts file (final output for this script)
   if (file.exists(file.path(base_dir, "counts", "feature_counts.rds"))) {
     cat("Found feature counts file, skipping processing\n")
     return(TRUE)
@@ -257,13 +205,7 @@ check_final_output_files <- function(gse_id) {
 check_output_files <- function(gse_id) {
   base_dir <- file.path(getwd(), gse_id, "results")
   
-  # Check for normalized counts file (final output)
-  if (file.exists(file.path(base_dir, "counts", "normalized_counts.rds"))) {
-    cat("Found normalized counts file, skipping processing\n")
-    return(TRUE)
-  }
-  
-  # Check for feature counts file
+  # Check for feature counts file (final output for this script)
   if (file.exists(file.path(base_dir, "counts", "feature_counts.rds"))) {
     cat("Found feature counts file, skipping processing\n")
     return(TRUE)
@@ -339,12 +281,6 @@ main <- function(gse_id = NULL) {
   # Create directories
   dirs <- c(fastqc_dir, trimmed_dir, star_index_dir, alignment_dir, counts_dir)
   sapply(dirs, dir.create, showWarnings = FALSE, recursive = TRUE)
-  
-  # Check if normalized counts exist (final output)
-  if (file.exists(file.path(counts_dir, "normalized_counts.rds"))) {
-    cat("Found normalized counts file, skipping all processing\n")
-    return(0)
-  }
   
   # Check if feature counts exist
   if (file.exists(file.path(counts_dir, "feature_counts.rds"))) {
@@ -439,34 +375,13 @@ main <- function(gse_id = NULL) {
     
     # Check if featureCounts was successful
     if (is.null(counts)) {
-      cat("featureCounts failed, cannot proceed with normalization\n")
+      cat("featureCounts failed, cannot proceed\n")
       return(1)
     }
   }
   
-  # Get batch information
-  cat("Preparing batch information...\n")
-  
-  # Extract sample information from the counts object
-  samples <- colnames(counts$counts)
-  cat(sprintf("Found %d samples: %s\n", length(samples), paste(samples, collapse=", ")))
-  
-  # Create batch information - for now, all samples are in the same batch
-  # In a real analysis, you would define batches based on experimental design
-  batch_info <- data.frame(
-    sample = samples,
-    batch = factor(rep(1, length(samples)))  # All samples in batch 1
-  )
-  
-  # Perform normalization
-  cat("Starting count normalization...\n")
-  norm_results <- normalize_counts(
-    counts$counts,
-    batch_info,
-    file.path(counts_dir, "normalized_counts.rds")
-  )
-  
   cat("=== RNA-seq Processing Pipeline Completed Successfully ===\n")
+  cat("Feature counts have been generated. Please run batch_correction.R next.\n")
 }
 
 # Run the main function if this script is being run directly
