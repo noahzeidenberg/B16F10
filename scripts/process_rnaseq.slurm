@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=06:30:00
+#SBATCH --time=04:30:00     # 4.5 hours should be sufficient for most datasets
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16  # 16 threads for fastp
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=16  # 16 threads for fastp and STAR
+#SBATCH --mem=64G           # 64GB should be sufficient for most datasets
 #SBATCH --job-name=process_rnaseq
 #SBATCH --output=logs/process_rnaseq/process_rnaseq_%A_%a.out
 #SBATCH --error=logs/process_rnaseq/process_rnaseq_%A_%a.err
@@ -124,13 +124,13 @@ check_output_files() {
     echo "=== Checking for existing output files ==="
     GSE_DIR=$SUBMIT_DIR/${GSE_ID}/results
     
-    # Check for normalized counts file (final output)
-    if [ -f "$GSE_DIR/counts/normalized_counts.rds" ]; then
-        echo "Found normalized counts file, skipping all processing"
+    # Check for feature counts file (final output for this script)
+    if [ -f "$GSE_DIR/counts/feature_counts.rds" ]; then
+        echo "Found feature counts file, skipping all processing"
         return 0
     fi
     
-    echo "No final output file found, proceeding with processing"
+    echo "No feature counts file found, proceeding with processing"
     return 1
 }
 
