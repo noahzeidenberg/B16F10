@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=06:00:00     # Less time needed for normalization
+#SBATCH --time=04:00:00     # Less time needed for normalization
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
