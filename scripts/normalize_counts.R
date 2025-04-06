@@ -130,10 +130,17 @@ main <- function() {
     return(0)
   }
   
-  # Load batch-corrected counts
-  batch_corrected_file <- file.path(batch_correction_dir, "batch_corrected_counts.rds")
+  # Load batch-corrected counts # temporarily using non-batch corrected counts
+  # batch_corrected_file <- file.path(batch_correction_dir, "batch_corrected_counts.rds")
+  # if (!file.exists(batch_corrected_file)) {
+  #   cat("Batch-corrected counts not found, cannot proceed\n")
+  #   return(1)
+  # }
+
+  # Load non-batch corrected counts from feature counts
+  batch_corrected_file <- file.path(base_dir, "results", "counts", "feature_counts.rds")
   if (!file.exists(batch_corrected_file)) {
-    cat("Batch-corrected counts not found, cannot proceed\n")
+    cat("Feature counts not found, cannot proceed\n")
     return(1)
   }
   
