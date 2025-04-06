@@ -62,23 +62,26 @@ run_fastp <- function(input_dir, output_dir) {
   
   for (r1_file in r1_files) {
     r2_file <- sub("_1.fastq.gz$", "_2.fastq.gz", r1_file)
-    if (!file.exists(r2_file)) {
-      cat(sprintf("Skipping %s - R2 file not found\n", r1_file))
-      next
-    }
+    is_paired_end <- file.exists(r2_file)
     
     # Generate output filenames
     sample_name <- basename(sub("_1.fastq.gz$", "", r1_file))
     out_r1 <- file.path(output_dir, paste0(sample_name, "_1.trimmed.fastq.gz"))
-    out_r2 <- file.path(output_dir, paste0(sample_name, "_2.trimmed.fastq.gz"))
     json_report <- file.path(output_dir, paste0(sample_name, ".fastp.json"))
     html_report <- file.path(output_dir, paste0(sample_name, ".fastp.html"))
     
-    cat(sprintf("Processing sample: %s\n", sample_name))
-    # Run fastp. Note it allows up to 16 threads
-    cmd <- sprintf("fastp --in1 %s --in2 %s --out1 %s --out2 %s --json %s --html %s --thread 16",
-                  r1_file, r2_file, out_r1, out_r2, json_report, html_report,
-                  parallel::detectCores() - 1)
+    cat(sprintf("Processing sample: %s (%s-end)\n", sample_name, ifelse(is_paired_end, "paired", "single")))
+    
+    # Run fastp with appropriate parameters based on whether it's paired-end or single-end
+    if (is_paired_end) {
+      out_r2 <- file.path(output_dir, paste0(sample_name, "_2.trimmed.fastq.gz"))
+      cmd <- sprintf("fastp --in1 %s --in2 %s --out1 %s --out2 %s --json %s --html %s --thread 16",
+                    r1_file, r2_file, out_r1, out_r2, json_report, html_report)
+    } else {
+      cmd <- sprintf("fastp --in1 %s --out1 %s --json %s --html %s --thread 16",
+                    r1_file, out_r1, json_report, html_report)
+    }
+    
     cat(sprintf("Executing fastp command: %s\n", cmd))
     system(cmd)
   }
@@ -108,21 +111,23 @@ run_star_alignment <- function(input_dir, genome_dir, output_dir) {
   
   for (r1_file in r1_files) {
     r2_file <- sub("_1.trimmed.fastq.gz$", "_2.trimmed.fastq.gz", r1_file)
-    if (!file.exists(r2_file)) {
-      cat(sprintf("Skipping %s - R2 file not found\n", r1_file))
+    is_paired_end <- file.exists(r2_file)
+    
+    # Check if the FASTQ file is corrupted
+    if (is_fastq_corrupted(r1_file)) {
+      cat(sprintf("Skipping %s - FASTQ file is corrupted\n", r1_file))
       next
     }
     
-    # Check if the FASTQ files are corrupted
-    if (is_fastq_corrupted(r1_file) || is_fastq_corrupted(r2_file)) {
-      cat(sprintf("Skipping %s - FASTQ file is corrupted\n", r1_file))
+    if (is_paired_end && is_fastq_corrupted(r2_file)) {
+      cat(sprintf("Skipping %s - R2 FASTQ file is corrupted\n", r1_file))
       next
     }
     
     sample_name <- basename(sub("_1.trimmed.fastq.gz$", "", r1_file))
     out_prefix <- file.path(output_dir, sample_name)
     
-    cat(sprintf("Aligning sample: %s\n", sample_name))
+    cat(sprintf("Aligning sample: %s (%s-end)\n", sample_name, ifelse(is_paired_end, "paired", "single")))
     
     # Check if BAM file already exists and is valid
     bam_file <- file.path(output_dir, paste0(sample_name, "_Aligned.sortedByCoord.out.bam"))
@@ -131,9 +136,15 @@ run_star_alignment <- function(input_dir, genome_dir, output_dir) {
       next
     }
     
-    # Run STAR with improved parameters for paired-end reads
-    cmd <- sprintf("STAR --genomeDir %s --readFilesIn %s %s --readFilesCommand zcat --outFileNamePrefix %s_ --outSAMtype BAM SortedByCoordinate --runThreadN %d --outSAMunmapped Within --outSAMattributes Standard --outFilterMultimapNmax 20 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --outFilterMismatchNmax 999 --outFilterMismatchNoverReadLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000 --alignMatesGapMax 1000000",
-                  genome_dir, r1_file, r2_file, out_prefix, parallel::detectCores() - 1)
+    # Run STAR with appropriate parameters based on whether it's paired-end or single-end
+    if (is_paired_end) {
+      cmd <- sprintf("STAR --genomeDir %s --readFilesIn %s %s --readFilesCommand zcat --outFileNamePrefix %s_ --outSAMtype BAM SortedByCoordinate --runThreadN %d --outSAMunmapped Within --outSAMattributes Standard --outFilterMultimapNmax 20 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --outFilterMismatchNmax 999 --outFilterMismatchNoverReadLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000 --alignMatesGapMax 1000000",
+                    genome_dir, r1_file, r2_file, out_prefix, parallel::detectCores() - 1)
+    } else {
+      cmd <- sprintf("STAR --genomeDir %s --readFilesIn %s --readFilesCommand zcat --outFileNamePrefix %s_ --outSAMtype BAM SortedByCoordinate --runThreadN %d --outSAMunmapped Within --outSAMattributes Standard --outFilterMultimapNmax 20 --alignSJoverhangMin 8 --alignSJDBoverhangMin 1 --outFilterMismatchNmax 999 --outFilterMismatchNoverReadLmax 0.04 --alignIntronMin 20 --alignIntronMax 1000000",
+                    genome_dir, r1_file, out_prefix, parallel::detectCores() - 1)
+    }
+    
     cat(sprintf("Executing STAR alignment command: %s\n", cmd))
     system(cmd)
     
@@ -170,6 +181,19 @@ run_feature_counts <- function(bam_dir, gtf_file, output_file) {
     return(NULL)
   }
   
+  # Determine if we're dealing with paired-end or single-end data
+  # We'll check the first BAM file to determine this
+  # If it has paired-end reads, we'll use isPairedEnd=TRUE, otherwise FALSE
+  # This is a simple heuristic - we'll assume all files are the same type
+  is_paired_end <- FALSE
+  if (length(valid_bam_files) > 0) {
+    # Use samtools to check if the BAM file has paired-end reads
+    # If the file has paired-end reads, it will have a "PE" flag in the header
+    cmd <- sprintf("samtools view -H %s | grep -q 'PE'", valid_bam_files[1])
+    is_paired_end <- system(cmd, intern = FALSE) == 0
+    cat(sprintf("Detected %s-end BAM files\n", ifelse(is_paired_end, "paired", "single")))
+  }
+  
   # Run featureCounts
   cat("Starting featureCounts analysis...\n")
   fc <- featureCounts(valid_bam_files,
@@ -177,7 +201,7 @@ run_feature_counts <- function(bam_dir, gtf_file, output_file) {
                      isGTFAnnotationFile = TRUE,
                      GTF.featureType = "gene",
                      GTF.attrType = "gene_id",
-                     isPairedEnd = TRUE,  # Enable paired-end mode
+                     isPairedEnd = is_paired_end,  # Set based on BAM file type
                      nthreads = parallel::detectCores() - 1)
   
   # Save results
