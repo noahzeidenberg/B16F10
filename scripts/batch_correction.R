@@ -305,7 +305,7 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
     has_groups <- !all(is.na(batch_info$group))
     
     if (has_groups) {
-      cat("Performing ComBat-seq batch correction with group information...\n")
+      cat("Performing ComBat-seq batch correction with model matrix...\n")
       
       # Check for NA groups
       na_groups <- is.na(batch_info$group)
@@ -331,55 +331,44 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
         }
       }
       
-      # Check for confounded groups (groups that only appear in one batch)
-      cat("Checking for confounded groups (groups that only appear in one batch)...\n")
+      # Create a treatment factor that identifies control vs. treatment
+      # First, identify all unique groups
+      all_groups <- unique(batch_info$group)
+      cat("All unique groups:\n")
+      print(all_groups)
       
-      # Create a contingency table of groups vs batches
-      group_batch_table <- table(batch_info$group, batch_info$batch)
+      # Create a treatment factor (control vs. treatment)
+      # We'll identify control groups based on common naming patterns
+      control_patterns <- c("control", "control[0-9]+", "ctrl", "untreated", "vehicle", "sham", "wt", "wild type")
       
-      # Find groups that only appear in one batch
-      confounded_groups <- c()
-      for (group in rownames(group_batch_table)) {
-        # Count how many batches this group appears in
-        num_batches_with_group <- sum(group_batch_table[group, ] > 0)
-        if (num_batches_with_group == 1) {
-          confounded_groups <- c(confounded_groups, group)
+      # Initialize treatment factor
+      treatment_factor <- rep("treatment", nrow(batch_info))
+      
+      # Identify control groups
+      for (group in all_groups) {
+        group_lower <- tolower(group)
+        is_control <- any(sapply(control_patterns, function(pattern) grepl(pattern, group_lower)))
+        
+        if (is_control) {
+          cat(sprintf("Identified control group: %s\n", group))
+          treatment_factor[batch_info$group == group] <- "control"
         }
       }
       
-      if (length(confounded_groups) > 0) {
-        cat(sprintf("Found %d confounded groups (groups that only appear in one batch):\n", length(confounded_groups)))
-        cat(paste(confounded_groups, collapse=", "), "\n")
-        cat("Removing these groups before batch correction.\n")
-        
-        # Remove samples with confounded groups
-        confounded_samples <- batch_info$group %in% confounded_groups
-        counts <- counts[, !confounded_samples]
-        batch_info <- batch_info[!confounded_samples, ]
-        
-        # Recalculate batch information
-        batch_info$batch <- factor(batch_info$batch)
-        
-        # Check if we still have enough samples per batch
-        samples_per_batch <- table(batch_info$batch)
-        min_samples_per_batch <- min(samples_per_batch)
-        cat(sprintf("After removing confounded groups, minimum samples per batch: %d\n", min_samples_per_batch))
-        
-        if (min_samples_per_batch < 2) {
-          cat("Error: After removing confounded groups, some batches have fewer than 2 samples.\n")
-          cat("Cannot proceed with batch correction.\n")
-          return(NULL)
-        }
-      }
+      # Convert to factor
+      treatment_factor <- factor(treatment_factor, levels = c("control", "treatment"))
       
-      # Create a group factor
-      group_factor <- factor(batch_info$group)
+      # Print treatment factor summary
+      cat("Treatment factor summary:\n")
+      print(table(treatment_factor))
       
-      # Print group information for debugging
-      cat("Group factor levels:\n")
-      print(levels(group_factor))
-      cat("Group factor summary:\n")
-      print(table(group_factor, useNA="ifany"))
+      # Create a model matrix for the treatment factor
+      # This will preserve the contrast between control and treatment
+      mod <- model.matrix(~treatment_factor)
+      
+      # Print model matrix
+      cat("Model matrix:\n")
+      print(mod)
       
       # Ensure counts is a matrix
       counts_matrix <- as.matrix(counts)
@@ -390,12 +379,13 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       # Print dimensions for debugging
       cat(sprintf("Counts matrix dimensions: %d x %d\n", nrow(counts_matrix), ncol(counts_matrix)))
       cat(sprintf("Number of batches: %d\n", length(unique(batch_factor))))
-      cat(sprintf("Number of groups: %d\n", length(unique(group_factor))))
       
-      # ComBat-seq batch correction with group information
+      # ComBat-seq batch correction with model matrix
+      # Set group=NULL as we're using mod to preserve treatment differences
       corrected_counts <- ComBat_seq(counts = counts_matrix,
                                     batch = batch_factor,
-                                    group = group_factor)
+                                    group = NULL,
+                                    mod = mod)
     } else {
       cat("Performing ComBat-seq batch correction without group information...\n")
       # Ensure counts is a matrix
