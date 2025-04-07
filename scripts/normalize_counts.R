@@ -69,9 +69,31 @@ normalize_counts <- function(counts, gene_lengths, output_dir) {
   # Create output directory
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
   
+  # Check if counts is NULL or empty
+  if (is.null(counts) || nrow(counts) == 0 || ncol(counts) == 0) {
+    cat("Error: Counts data is NULL or empty\n")
+    return(NULL)
+  }
+  
+  # Print counts dimensions and first few rows for debugging
+  cat(sprintf("Counts dimensions: %d rows x %d columns\n", nrow(counts), ncol(counts)))
+  cat("First few row names of counts:\n")
+  print(head(rownames(counts)))
+  
+  # Print gene lengths dimensions and first few rows for debugging
+  cat(sprintf("Gene lengths dimensions: %d rows\n", nrow(gene_lengths)))
+  cat("First few gene IDs from gene lengths:\n")
+  print(head(gene_lengths$gene_id))
+  
   # Match gene IDs
   common_genes <- intersect(rownames(counts), gene_lengths$gene_id)
   cat(sprintf("Found %d common genes\n", length(common_genes)))
+  
+  if (length(common_genes) == 0) {
+    cat("Error: No common genes found between counts and gene lengths\n")
+    cat("This might be due to different gene ID formats\n")
+    return(NULL)
+  }
   
   # Filter counts and gene lengths
   counts <- counts[common_genes, ]
@@ -147,6 +169,12 @@ main <- function(gse_id) {
   cat("Loading batch-corrected counts...\n")
   batch_corrected <- readRDS(batch_corrected_file)
   
+  # Check if the counts data exists and is not NULL
+  if (is.null(batch_corrected) || is.null(batch_corrected$corrected_counts)) {
+    cat("Error: Counts data is NULL or missing in the loaded RDS file\n")
+    return(1)
+  }
+  
   # Load gene length information
   ref_gtf <- file.path("~/scratch/B16F10/mm39/GCF_000001635.27_GRCm39_genomic.gtf")
   if (!file.exists(ref_gtf)) {
@@ -163,7 +191,13 @@ main <- function(gse_id) {
     output_dir
   )
   
+  if (is.null(results)) {
+    cat("Normalization failed\n")
+    return(1)
+  }
+  
   cat("=== RNA-seq Normalization Pipeline Completed Successfully ===\n")
+  return(0)
 }
 
 # Run the main function if this script is being run directly
@@ -179,5 +213,5 @@ if (sys.nframe() == 0) {
   
   gse_id <- args[1]
   cat(sprintf("Processing GSE ID: %s\n", gse_id))
-  main(gse_id)
+  quit(status = main(gse_id))
 } 
