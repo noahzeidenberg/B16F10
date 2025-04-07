@@ -307,7 +307,7 @@ make_api_request <- function(fn, ...) {
 }
 
 # Function to get SRX IDs from GSM IDs and save GSM objects
-get_srx_ids <- function(gse_id) {
+get_srx_ids <- function(gse_id, gse_dir, api_key = NULL) {
   gse_dir <- create_gse_structure(gse_id)
   
   # Get the GEO object without matrix
@@ -409,7 +409,10 @@ get_srx_ids <- function(gse_id) {
       
       cat(sprintf("Successfully processed %d GSM samples and found %d SRX IDs\n", 
                   total_gsm, length(srx_ids)))
-      return(srx_ids)
+      return(list(
+        gsm_ids = names(gsm_list),
+        srx_ids = srx_ids
+      ))
       
     }, error = function(e) {
       retry_count <- retry_count + 1
@@ -434,8 +437,9 @@ get_srx_ids <- function(gse_id) {
 }
 
 # Function to convert SRX IDs to SRA IDs using rentrez
-convert_srx_to_sra <- function(srx_ids) {
+convert_srx_to_sra <- function(srx_ids, api_key = NULL) {
   sra_ids <- list()
+  srx_to_sra_mapping <- list()  # New: Create a mapping between SRX and SRA IDs
   
   for (i in seq_along(srx_ids)) {
     srx_id <- srx_ids[i]
@@ -481,6 +485,8 @@ convert_srx_to_sra <- function(srx_ids) {
         
         if (length(valid_srr_ids) > 0) {
           sra_ids[[srx_id]] <- valid_srr_ids
+          # Store the mapping between SRX and SRA IDs
+          srx_to_sra_mapping[[srx_id]] <- valid_srr_ids
           cat(sprintf("Found %d SRA ID(s): %s\n", 
                      length(valid_srr_ids), 
                      paste(valid_srr_ids, collapse = ", ")))
@@ -519,17 +525,22 @@ convert_srx_to_sra <- function(srx_ids) {
     return(NULL)
   }
   
-  return(all_sra_ids)
+  # Return both the list of all SRA IDs and the mapping
+  return(list(
+    sra_ids = all_sra_ids,
+    srx_to_sra_mapping = srx_to_sra_mapping
+  ))
 }
 
 # Function to download SRA files
-download_sra_files <- function(gse_id, sra_ids) {
+download_sra_files <- function(sra_data, gse_dir, api_key = NULL) {
   if (!check_command("prefetch")) {
     stop("prefetch command not found. Please ensure SRA toolkit is installed and in PATH")
   }
   
-  base_dir <- get_base_dir()
-  gse_dir <- file.path(base_dir, gse_id)
+  # Extract the SRA IDs and mapping
+  sra_ids <- sra_data$sra_ids
+  srx_to_sra_mapping <- sra_data$srx_to_sra_mapping
   
   # Debug: Check if GSE directory exists
   if (!dir.exists(gse_dir)) {
@@ -553,14 +564,65 @@ download_sra_files <- function(gse_id, sra_ids) {
     cat(sprintf("  - %s\n", dir))
   }
   
+  # Create a mapping from GSM IDs to their directories
+  gsm_to_dir_mapping <- list()
+  for (gsm_dir in gsm_dirs) {
+    gsm_id <- basename(gsm_dir)
+    gsm_to_dir_mapping[[gsm_id]] <- gsm_dir
+  }
+  
+  # Create a mapping from SRX IDs to GSM IDs by reading the GSM objects
+  srx_to_gsm_mapping <- list()
+  for (gsm_dir in gsm_dirs) {
+    gsm_id <- basename(gsm_dir)
+    rds_file <- file.path(gsm_dir, paste0(gsm_id, ".rds"))
+    
+    if (file.exists(rds_file)) {
+      gsm <- readRDS(rds_file)
+      relations <- Meta(gsm)$relation
+      sra_link <- relations[grep("SRA:", relations)]
+      
+      if (length(sra_link) > 0) {
+        # Extract SRX ID from the SRA link
+        srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+        # Clean up the SRX ID
+        srx_id <- gsub("\\[.*\\]", "", srx_id)  # Remove any brackets and their contents
+        srx_id <- trimws(srx_id)  # Remove any whitespace
+        
+        # Store the mapping
+        srx_to_gsm_mapping[[srx_id]] <- gsm_id
+        cat(sprintf("Mapped SRX %s to GSM %s\n", srx_id, gsm_id))
+      }
+    }
+  }
+  
   # Download SRA files for each sample
   for (sra_id in sra_ids) {
     cat(sprintf("Downloading SRA %s\n", sra_id))
     
-    # Find the GSM directory that contains this SRA ID
-    sra_found <- FALSE
-    for (gsm_dir in gsm_dirs) {
-      gsm_id <- basename(gsm_dir)
+    # Find which SRX IDs are associated with this SRA ID
+    associated_srx_ids <- names(srx_to_sra_mapping)[sapply(srx_to_sra_mapping, function(x) sra_id %in% x)]
+    
+    if (length(associated_srx_ids) == 0) {
+      cat(sprintf("Warning: No SRX IDs found for SRA ID %s\n", sra_id))
+      next
+    }
+    
+    # Find which GSM IDs are associated with these SRX IDs
+    associated_gsm_ids <- sapply(associated_srx_ids, function(srx_id) srx_to_gsm_mapping[[srx_id]])
+    associated_gsm_ids <- associated_gsm_ids[!is.na(associated_gsm_ids)]
+    
+    if (length(associated_gsm_ids) == 0) {
+      cat(sprintf("Warning: No GSM IDs found for SRA ID %s\n", sra_id))
+      next
+    }
+    
+    cat(sprintf("SRA %s is associated with GSM IDs: %s\n", 
+                sra_id, paste(associated_gsm_ids, collapse = ", ")))
+    
+    # Download the SRA file to each associated GSM directory
+    for (gsm_id in associated_gsm_ids) {
+      gsm_dir <- gsm_to_dir_mapping[[gsm_id]]
       sra_dir <- file.path(gsm_dir, "SRA")
       
       # Debug: Check if SRA directory exists
@@ -581,8 +643,7 @@ download_sra_files <- function(gse_id, sra_ids) {
       if (file.exists(sra_file) && file.info(sra_file)$size > 0) {
         cat(sprintf("SRA file already exists: %s (size: %.2f MB)\n", 
                    sra_file, file.info(sra_file)$size/1024/1024))
-        sra_found <- TRUE
-        break
+        next
       }
       
       # Download SRA file
@@ -617,21 +678,15 @@ download_sra_files <- function(gse_id, sra_ids) {
           cat(sprintf("Successfully downloaded SRA file: %s (size: %.2f MB)\n", 
                      sra_file, file.info(sra_file)$size/1024/1024))
           success <- TRUE
-          sra_found <- TRUE
-          break
         } else {
           warning(sprintf("Failed to download SRA file: %s", sra_id))
           retry_count <- retry_count + 1
         }
       }
       
-      if (success) {
-        break
+      if (!success) {
+        warning(sprintf("Failed to download SRA file after %d attempts: %s", max_retries, sra_id))
       }
-    }
-    
-    if (!sra_found) {
-      warning(sprintf("Failed to download SRA file after checking all GSM directories: %s", sra_id))
     }
   }
 }
@@ -764,9 +819,63 @@ process_single_sra <- function(sra_id, gse_dir, temp_dir, threads) {
     cat(sprintf("  - %s\n", dir))
   }
   
+  # Create a mapping from GSM IDs to their directories
+  gsm_to_dir_mapping <- list()
   for (gsm_dir in gsm_dirs) {
     gsm_id <- basename(gsm_dir)
-    cat(sprintf("Checking GSM directory: %s\n", gsm_id))
+    gsm_to_dir_mapping[[gsm_id]] <- gsm_dir
+  }
+  
+  # Create a mapping from SRX IDs to GSM IDs by reading the GSM objects
+  srx_to_gsm_mapping <- list()
+  for (gsm_dir in gsm_dirs) {
+    gsm_id <- basename(gsm_dir)
+    rds_file <- file.path(gsm_dir, paste0(gsm_id, ".rds"))
+    
+    if (file.exists(rds_file)) {
+      gsm <- readRDS(rds_file)
+      relations <- Meta(gsm)$relation
+      sra_link <- relations[grep("SRA:", relations)]
+      
+      if (length(sra_link) > 0) {
+        # Extract SRX ID from the SRA link
+        srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+        # Clean up the SRX ID
+        srx_id <- gsub("\\[.*\\]", "", srx_id)  # Remove any brackets and their contents
+        srx_id <- trimws(srx_id)  # Remove any whitespace
+        
+        # Store the mapping
+        srx_to_gsm_mapping[[srx_id]] <- gsm_id
+        cat(sprintf("Mapped SRX %s to GSM %s\n", srx_id, gsm_id))
+      }
+    }
+  }
+  
+  # Find which GSM directories contain this SRA ID
+  gsm_ids_with_sra <- c()
+  for (gsm_dir in gsm_dirs) {
+    gsm_id <- basename(gsm_dir)
+    sra_dir <- file.path(gsm_dir, "SRA")
+    sra_file <- file.path(sra_dir, sra_id, paste0(sra_id, ".sra"))
+    
+    if (file.exists(sra_file) && file.info(sra_file)$size > 0) {
+      gsm_ids_with_sra <- c(gsm_ids_with_sra, gsm_id)
+    }
+  }
+  
+  if (length(gsm_ids_with_sra) == 0) {
+    cat(sprintf("No GSM directories found with valid SRA file for SRA ID: %s\n", sra_id))
+    return(FALSE)
+  }
+  
+  cat(sprintf("Found SRA %s in %d GSM directories: %s\n", 
+              sra_id, length(gsm_ids_with_sra), paste(gsm_ids_with_sra, collapse = ", ")))
+  
+  # Process the SRA file for each GSM directory
+  success_count <- 0
+  for (gsm_id in gsm_ids_with_sra) {
+    gsm_dir <- gsm_to_dir_mapping[[gsm_id]]
+    cat(sprintf("Processing SRA %s for GSM %s\n", sra_id, gsm_id))
     
     # Construct paths
     sra_dir <- file.path(gsm_dir, "SRA")
@@ -794,7 +903,8 @@ process_single_sra <- function(sra_id, gse_dir, temp_dir, threads) {
       if (length(existing_fastq_files) > 0) {
         cat(sprintf("FASTQ files already exist for SRA %s in %s. Skipping conversion.\n", 
                    sra_id, fastq_dir))
-        return(TRUE)
+        success_count <- success_count + 1
+        next
       }
     }
     
@@ -913,6 +1023,7 @@ process_single_sra <- function(sra_id, gse_dir, temp_dir, threads) {
               }
               
               success <- TRUE
+              success_count <- success_count + 1
               break
             } else {
               warning(sprintf("Failed to compress FASTQ files for SRA %s", sra_id))
@@ -927,8 +1038,6 @@ process_single_sra <- function(sra_id, gse_dir, temp_dir, threads) {
         if (!success) {
           stop(sprintf("Failed to convert SRA file after %d attempts: %s", max_retries, sra_id))
         }
-        
-        return(TRUE)
       } else {
         cat(sprintf("SRA file exists but has zero size: %s\n", sra_file))
       }
@@ -950,8 +1059,14 @@ process_single_sra <- function(sra_id, gse_dir, temp_dir, threads) {
     }
   }
   
-  cat(sprintf("No valid SRA file found for SRA ID: %s\n", sra_id))
-  return(FALSE)
+  if (success_count == 0) {
+    cat(sprintf("Failed to process SRA ID %s for any GSM directory\n", sra_id))
+    return(FALSE)
+  }
+  
+  cat(sprintf("Successfully processed SRA ID %s for %d out of %d GSM directories\n", 
+              sra_id, success_count, length(gsm_ids_with_sra)))
+  return(TRUE)
 }
 
 # Function to check if FASTQ files exist for a GSE ID
@@ -980,6 +1095,89 @@ check_fastq_files <- function(gse_id) {
   }
   
   return(FALSE)
+}
+
+# Main function to download and process SRA files
+download_and_process_sra <- function(gse_id, api_key = NULL, threads = 4) {
+  # Set up logging
+  log_file <- file.path(getwd(), paste0(gse_id, "_download.log"))
+  cat(sprintf("Starting download and processing for %s\n", gse_id), file = log_file)
+  
+  # Check for required commands
+  check_required_commands()
+  
+  # Load required packages
+  load_required_packages()
+  
+  # Validate API key
+  if (!is.null(api_key)) {
+    validate_api_key(api_key)
+  }
+  
+  # Create directory structure
+  gse_dir <- create_directory_structure(gse_id)
+  
+  # Get GSM IDs and SRX IDs
+  cat("Getting GSM IDs and SRX IDs...\n", file = log_file, append = TRUE)
+  gsm_data <- get_srx_ids(gse_id, gse_dir, api_key)
+  
+  if (length(gsm_data$gsm_ids) == 0) {
+    cat("No GSM IDs found. Exiting.\n", file = log_file, append = TRUE)
+    return(FALSE)
+  }
+  
+  # Convert SRX IDs to SRA IDs
+  cat("Converting SRX IDs to SRA IDs...\n", file = log_file, append = TRUE)
+  sra_data <- convert_srx_to_sra(gsm_data$srx_ids, api_key)
+  
+  if (length(sra_data$sra_ids) == 0) {
+    cat("No SRA IDs found. Exiting.\n", file = log_file, append = TRUE)
+    return(FALSE)
+  }
+  
+  # Download SRA files
+  cat("Downloading SRA files...\n", file = log_file, append = TRUE)
+  download_sra_files(sra_data, gse_dir, api_key)
+  
+  # Create temporary directory for processing
+  temp_dir <- file.path(gse_dir, "temp")
+  if (!dir.exists(temp_dir)) {
+    dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  
+  # Process SRA files
+  cat("Processing SRA files...\n", file = log_file, append = TRUE)
+  
+  # Get all unique SRA IDs
+  all_sra_ids <- unique(unlist(sra_data$srx_to_sra_mapping))
+  cat(sprintf("Found %d unique SRA IDs to process\n", length(all_sra_ids)), file = log_file, append = TRUE)
+  
+  # Process each SRA ID
+  success_count <- 0
+  for (sra_id in all_sra_ids) {
+    cat(sprintf("Processing SRA ID: %s\n", sra_id), file = log_file, append = TRUE)
+    
+    # Process the SRA file
+    result <- process_single_sra(sra_id, gse_dir, temp_dir, threads)
+    
+    if (result) {
+      success_count <- success_count + 1
+      cat(sprintf("Successfully processed SRA ID: %s\n", sra_id), file = log_file, append = TRUE)
+    } else {
+      cat(sprintf("Failed to process SRA ID: %s\n", sra_id), file = log_file, append = TRUE)
+    }
+  }
+  
+  # Clean up temporary directory
+  if (dir.exists(temp_dir)) {
+    unlink(temp_dir, recursive = TRUE)
+  }
+  
+  # Log final results
+  cat(sprintf("Processed %d out of %d SRA IDs successfully\n", 
+              success_count, length(all_sra_ids)), file = log_file, append = TRUE)
+  
+  return(success_count == length(all_sra_ids))
 }
 
 # Main workflow
@@ -1026,17 +1224,17 @@ main <- function(gse_id = NULL) {
     
     # Convert SRX to SRA IDs
     cat("Converting SRX to SRA IDs...\n")
-    sra_ids <- convert_srx_to_sra(srx_ids)
-    if (is.null(sra_ids)) {
+    sra_data <- convert_srx_to_sra(srx_ids)
+    if (is.null(sra_data)) {
       stop(sprintf("Failed to convert SRX to SRA IDs for %s", gse_id))
     }
     
     # Download and convert files
     cat("Downloading SRA files...\n")
-    download_sra_files(gse_id, sra_ids)
+    download_sra_files(gse_id, sra_data)
     
     cat("Converting SRA to FASTQ...\n")
-    convert_sra_to_fastq(gse_id, sra_ids)
+    convert_sra_to_fastq(gse_id, sra_data$sra_ids)
     
     cat("Download and conversion complete!\n")
   }, error = function(e) {

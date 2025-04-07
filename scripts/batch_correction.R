@@ -81,6 +81,13 @@ collect_feature_counts <- function(base_dir, design_matrices) {
       counts <- counts_obj$counts
       samples <- colnames(counts)
       
+      # Skip GSEs with only one sample
+      if (length(samples) <= 1) {
+        cat(sprintf("Skipping %s: Only %d sample(s) found (ComBat-seq requires multiple samples per batch)\n", 
+                   gse_id, length(samples)))
+        next
+      }
+      
       # Add GSE ID to sample names to make them unique
       new_samples <- paste0(gse_id, "_", samples)
       colnames(counts) <- new_samples
@@ -149,6 +156,17 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
   # Check if we have multiple batches
   num_batches <- length(unique(batch_info$batch))
   cat(sprintf("Number of batches: %d\n", num_batches))
+  
+  # Check if we have at least 2 samples per batch
+  samples_per_batch <- table(batch_info$batch)
+  min_samples_per_batch <- min(samples_per_batch)
+  cat(sprintf("Minimum samples per batch: %d\n", min_samples_per_batch))
+  
+  if (min_samples_per_batch < 2) {
+    cat("Error: Some batches have fewer than 2 samples. ComBat-seq requires at least 2 samples per batch.\n")
+    cat("Please ensure all batches have at least 2 samples before running batch correction.\n")
+    return(NULL)
+  }
   
   if (num_batches > 1) {
     # Check if we have group information
