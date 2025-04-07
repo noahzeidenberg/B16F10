@@ -30,7 +30,7 @@ perform_de_analysis <- function(gse_id) {
   
   # Set up directories
   base_dir <- getwd()
-  batch_correction_dir <- file.path(base_dir, "results", "batch_correction")
+  normalization_dir <- file.path(base_dir, "results", "normalization")
   design_dir <- file.path(base_dir, "results", "design_matrices")
   output_dir <- file.path(base_dir, "results", "differential_expression")
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
@@ -42,24 +42,26 @@ perform_de_analysis <- function(gse_id) {
     return(TRUE)
   }
   
-  # Load batch-corrected counts
-  batch_corrected_file <- file.path(batch_correction_dir, "batch_corrected_counts.rds")
-  if (!file.exists(batch_corrected_file)) {
-    cat(sprintf("Batch-corrected counts not found. Cannot proceed.\n"))
+  # Load normalized counts
+  normalized_file <- file.path(normalization_dir, "normalized_counts.rds")
+  if (!file.exists(normalized_file)) {
+    cat(sprintf("Normalized counts not found. Cannot proceed.\n"))
     return(FALSE)
   }
   
-  cat("Loading batch-corrected counts...\n")
-  batch_corrected_data <- readRDS(batch_corrected_file)
+  cat("Loading normalized counts...\n")
+  normalized_data <- readRDS(normalized_file)
   
-  # Extract counts and batch info
-  counts <- batch_corrected_data$corrected_counts
-  batch_info <- batch_corrected_data$batch_info
+  # Extract counts
+  counts <- normalized_data$normalized_counts
+  
+  # Get sample names from the counts matrix
+  samples <- colnames(counts)
   
   # Filter counts for the specific GSE ID
-  gse_samples <- batch_info$sample[grep(paste0("^", gse_id, "_"), batch_info$sample)]
+  gse_samples <- samples[grep(paste0("^", gse_id, "_"), samples)]
   if (length(gse_samples) == 0) {
-    cat(sprintf("No samples found for %s in batch-corrected data. Cannot proceed.\n", gse_id))
+    cat(sprintf("No samples found for %s in normalized data. Cannot proceed.\n", gse_id))
     return(FALSE)
   }
   
