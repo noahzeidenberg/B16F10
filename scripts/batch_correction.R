@@ -78,6 +78,12 @@ collect_feature_counts <- function(base_dir, design_matrices) {
       counts_obj <- readRDS(counts_file)
       
       # Extract counts and sample names
+      # Make sure we're getting the counts matrix correctly
+      if (is.null(counts_obj$counts)) {
+        cat(sprintf("Warning: No counts matrix found in %s\n", counts_file))
+        next
+      }
+      
       counts <- counts_obj$counts
       samples <- colnames(counts)
       
@@ -207,15 +213,36 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       cat("Group factor summary:\n")
       print(table(group_factor, useNA="ifany"))
       
+      # Ensure counts is a matrix
+      counts_matrix <- as.matrix(counts)
+      
+      # Ensure batch is a factor
+      batch_factor <- as.factor(batch_info$batch)
+      
+      # Print dimensions for debugging
+      cat(sprintf("Counts matrix dimensions: %d x %d\n", nrow(counts_matrix), ncol(counts_matrix)))
+      cat(sprintf("Number of batches: %d\n", length(unique(batch_factor))))
+      cat(sprintf("Number of groups: %d\n", length(unique(group_factor))))
+      
       # ComBat-seq batch correction with group information
-      corrected_counts <- ComBat_seq(counts = as.matrix(counts),
-                                    batch = batch_info$batch,
+      corrected_counts <- ComBat_seq(counts = counts_matrix,
+                                    batch = batch_factor,
                                     group = group_factor)
     } else {
       cat("Performing ComBat-seq batch correction without group information...\n")
+      # Ensure counts is a matrix
+      counts_matrix <- as.matrix(counts)
+      
+      # Ensure batch is a factor
+      batch_factor <- as.factor(batch_info$batch)
+      
+      # Print dimensions for debugging
+      cat(sprintf("Counts matrix dimensions: %d x %d\n", nrow(counts_matrix), ncol(counts_matrix)))
+      cat(sprintf("Number of batches: %d\n", length(unique(batch_factor))))
+      
       # ComBat-seq batch correction without group information
-      corrected_counts <- ComBat_seq(counts = as.matrix(counts),
-                                    batch = batch_info$batch)
+      corrected_counts <- ComBat_seq(counts = counts_matrix,
+                                    batch = batch_factor)
     }
     
     # Check if correction made any changes
