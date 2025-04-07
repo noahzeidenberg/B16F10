@@ -148,7 +148,7 @@ main <- function(gse_id) {
   batch_corrected <- readRDS(batch_corrected_file)
   
   # Load gene length information
-  ref_gtf <- file.path(base_dir, "mm39", "GCF_000001635.27_GRCm39_genomic.gtf")
+  ref_gtf <- file.path("~/scratch/B16F10/mm39/GCF_000001635.27_GRCm39_genomic.gtf")
   if (!file.exists(ref_gtf)) {
     cat("Reference GTF file not found, cannot proceed\n")
     return(1)
