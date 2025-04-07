@@ -43,11 +43,57 @@ load_design_matrices <- function(design_dir) {
     gse_id <- gsub("_design_matrix.txt", "", basename(file))
     cat(sprintf("Loading design matrix for %s\n", gse_id))
     
-    # Read the design matrix
-    design_matrix <- read.table(file, header = TRUE, stringsAsFactors = FALSE)
-    
-    # Store in list
-    design_matrices[[gse_id]] <- design_matrix
+    # First, examine the file to understand its structure
+    tryCatch({
+      # Read the first few lines to understand the structure
+      first_lines <- readLines(file, n = 5)
+      cat("First few lines of the file:\n")
+      print(first_lines)
+      
+      # Check for BOM character in the first line
+      if (length(first_lines) > 0 && grepl("^﻿", first_lines[1])) {
+        cat("Detected BOM character in the file\n")
+        # Remove BOM from the first line
+        first_lines[1] <- sub("^﻿", "", first_lines[1])
+      }
+      
+      # Count the number of columns in the first data line
+      if (length(first_lines) > 1) {
+        data_line <- first_lines[2]
+        num_cols <- length(strsplit(data_line, "\t")[[1]])
+        cat(sprintf("Number of columns in data: %d\n", num_cols))
+      }
+      
+      # Try to read the file with different approaches
+      if (grepl("\t", first_lines[1])) {
+        # Tab-separated file
+        cat("Detected tab-separated file\n")
+        # Use fileEncoding to handle BOM
+        design_matrix <- read.table(file, header = TRUE, sep = "\t", stringsAsFactors = FALSE, 
+                                   fileEncoding = "UTF-8-BOM")
+      } else if (grepl(",", first_lines[1])) {
+        # Comma-separated file
+        cat("Detected comma-separated file\n")
+        # Use fileEncoding to handle BOM
+        design_matrix <- read.table(file, header = TRUE, sep = ",", stringsAsFactors = FALSE, 
+                                   fileEncoding = "UTF-8-BOM")
+      } else {
+        # Space-separated file
+        cat("Detected space-separated file\n")
+        # Use fileEncoding to handle BOM
+        design_matrix <- read.table(file, header = TRUE, stringsAsFactors = FALSE, 
+                                   fileEncoding = "UTF-8-BOM")
+      }
+      
+      # Print the structure of the loaded data
+      cat("Structure of loaded design matrix:\n")
+      str(design_matrix)
+      
+      # Store in list
+      design_matrices[[gse_id]] <- design_matrix
+    }, error = function(e) {
+      cat(sprintf("Error loading design matrix for %s: %s\n", gse_id, e$message))
+    })
   }
   
   return(design_matrices)
