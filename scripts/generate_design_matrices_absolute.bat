@@ -44,6 +44,8 @@ for %%f in ("%SAMPLE_DIR%\*_sample_info.txt") do (
     
     :: Create prompt file
     echo Analyze these samples and assign them to groups based on their experimental conditions. > "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo The group names should work for ComBat and edgeR design matrices. > "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo Please provide a tab-separated list with two columns: Sample_geo_accession and Group. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     echo Sample information: >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     
     :: Extract both GSM IDs and sample titles
@@ -60,12 +62,10 @@ for %%f in ("%SAMPLE_DIR%\*_sample_info.txt") do (
     )
     
     echo. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-    echo Please provide a tab-separated list with two columns: Sample_geo_accession and Group. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-    echo The output must include the column headers. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-    echo For each sample, assign it to a group based on the experimental conditions mentioned in the title. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    
+    echo The output must include the column headers 'Sample_geo_accession' and 'Group'. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     echo Use consistent group names across similar conditions. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-    echo The Sample_geo_accession values always start with GSM, while the Group values could be 'treatment' and 'control', 'Group1' and 'Group2', etc. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-    echo Keep group names simple and consistent. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo ONLY REPLY WITH THE TAB-SEPARATED LIST OF SAMPLE_GEO_ACCESSION AND GROUP, WITHOUT ANY OTHER TEXT. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
 
     
     :: Create a temporary file for the prompt content
