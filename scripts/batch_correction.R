@@ -22,6 +22,49 @@ for (pkg in required_packages) {
   library(pkg, character.only = TRUE)
 }
 
+# Function to create SRR to GSM mapping
+create_srr_gsm_mapping <- function(base_dir) {
+  cat("Creating SRR to GSM mapping...\n")
+  
+  # Find all GSE directories
+  gse_dirs <- list.dirs(base_dir, recursive = FALSE)
+  gse_dirs <- gse_dirs[grep("^GSE", basename(gse_dirs))]
+  
+  # Create a mapping from SRR to GSM
+  srr_to_gsm <- list()
+  
+  for (gse_dir in gse_dirs) {
+    gse_id <- basename(gse_dir)
+    
+    # Find all sample directories
+    sample_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
+    
+    for (sample_dir in sample_dirs) {
+      gsm_id <- basename(sample_dir)
+      
+      # Check if this is a GSM ID
+      if (grepl("^GSM", gsm_id)) {
+        # Look for SRA directory
+        sra_dir <- file.path(sample_dir, "SRA")
+        if (dir.exists(sra_dir)) {
+          # Look for SRA files
+          sra_files <- list.files(sra_dir, pattern = "\\.sra$", full.names = TRUE)
+          
+          for (sra_file in sra_files) {
+            srr_id <- gsub("\\.sra$", "", basename(sra_file))
+            
+            # Add to mapping
+            srr_to_gsm[[srr_id]] <- gsm_id
+          }
+        }
+      }
+    }
+  }
+  
+  cat(sprintf("Created mapping for %d SRR IDs\n", length(srr_to_gsm)))
+  return(srr_to_gsm)
+}
+
 # Function to load design matrices
 load_design_matrices <- function(design_dir) {
   cat("Loading design matrices...\n")
@@ -100,7 +143,7 @@ load_design_matrices <- function(design_dir) {
 }
 
 # Function to collect all feature counts files
-collect_feature_counts <- function(base_dir, design_matrices) {
+collect_feature_counts <- function(base_dir, design_matrices, srr_to_gsm) {
   cat("Collecting all feature counts files...\n")
   
   # Find all GSE directories
@@ -152,17 +195,29 @@ collect_feature_counts <- function(base_dir, design_matrices) {
         # Match samples to their groups
         for (i in 1:length(samples)) {
           sample_id <- samples[i]
-          # Find the row in the design matrix that matches this sample
-          match_idx <- which(design_matrix$Sample_geo_accession == sample_id)
-          if (length(match_idx) > 0) {
-            groups[i] <- design_matrix$Group[match_idx]
+          
+          # Extract SRR ID from the sample ID if it's a BAM file
+          srr_id <- NULL
+          if (grepl("_Aligned\\.sortedByCoord\\.out\\.bam$", sample_id)) {
+            srr_id <- gsub("_Aligned\\.sortedByCoord\\.out\\.bam$", "", sample_id)
+          } else if (grepl("^SRR", sample_id)) {
+            srr_id <- sample_id
+          }
+          
+          # If we have an SRR ID, try to map it to a GSM ID
+          if (!is.null(srr_id) && srr_id %in% names(srr_to_gsm)) {
+            gsm_id <- srr_to_gsm[[srr_id]]
+            
+            # Find the row in the design matrix that matches this GSM ID
+            match_idx <- which(design_matrix$Sample_geo_accession == gsm_id)
+            if (length(match_idx) > 0) {
+              groups[i] <- design_matrix$Group[match_idx]
+            }
           } else {
-            # Try to match without the GSE prefix if it exists in the sample ID
-            if (grepl("^GSM", sample_id)) {
-              match_idx <- which(design_matrix$Sample_geo_accession == sample_id)
-              if (length(match_idx) > 0) {
-                groups[i] <- design_matrix$Group[match_idx]
-              }
+            # Try direct matching with the sample ID
+            match_idx <- which(design_matrix$Sample_geo_accession == sample_id)
+            if (length(match_idx) > 0) {
+              groups[i] <- design_matrix$Group[match_idx]
             }
           }
         }
@@ -338,11 +393,14 @@ main <- function() {
     return(0)
   }
   
+  # Create SRR to GSM mapping
+  srr_to_gsm <- create_srr_gsm_mapping(base_dir)
+  
   # Load design matrices
   design_matrices <- load_design_matrices(design_dir)
   
   # Collect all feature counts
-  all_data <- collect_feature_counts(base_dir, design_matrices)
+  all_data <- collect_feature_counts(base_dir, design_matrices, srr_to_gsm)
   
   if (is.null(all_data)) {
     cat("Failed to collect feature counts, cannot proceed\n")
