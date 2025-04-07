@@ -252,7 +252,7 @@ main <- function() {
   # Set up directories
   base_dir <- getwd()
   output_dir <- file.path(base_dir, "results", "batch_correction")
-  design_dir <- file.path(base_dir, "results", "design_matrices", "sample_design", "design_matrices")
+  design_dir <- file.path(base_dir, "sample_design", "sample_design", "design_matrices")
   
   cat("Setting up directories...\n")
   cat(sprintf("Base directory: %s\n", base_dir))
