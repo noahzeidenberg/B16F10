@@ -306,6 +306,31 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
     
     if (has_groups) {
       cat("Performing ComBat-seq batch correction with group information...\n")
+      
+      # Check for NA groups
+      na_groups <- is.na(batch_info$group)
+      if (any(na_groups)) {
+        cat(sprintf("Found %d samples with NA groups. Removing these samples before batch correction.\n", sum(na_groups)))
+        
+        # Remove samples with NA groups
+        counts <- counts[, !na_groups]
+        batch_info <- batch_info[!na_groups, ]
+        
+        # Recalculate batch information
+        batch_info$batch <- factor(batch_info$batch)
+        
+        # Check if we still have enough samples per batch
+        samples_per_batch <- table(batch_info$batch)
+        min_samples_per_batch <- min(samples_per_batch)
+        cat(sprintf("After removing NA groups, minimum samples per batch: %d\n", min_samples_per_batch))
+        
+        if (min_samples_per_batch < 2) {
+          cat("Error: After removing NA groups, some batches have fewer than 2 samples.\n")
+          cat("Cannot proceed with batch correction.\n")
+          return(NULL)
+        }
+      }
+      
       # Create a group factor
       group_factor <- factor(batch_info$group)
       
