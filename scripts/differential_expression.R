@@ -179,33 +179,31 @@ perform_de_analysis <- function(gse_id) {
     return(FALSE)
   }
   
-  # Create a mapping between SRA IDs and sample names in the design matrix
-  # This assumes that the design matrix has a column with SRA IDs
-  sra_column <- NULL
-  for (col in colnames(design_matrix)) {
-    if (any(grepl("^SRR", design_matrix[[col]]))) {
-      sra_column <- col
-      break
-    }
-  }
-  
-  if (is.null(sra_column)) {
-    cat("Could not find a column with SRA IDs in the design matrix. Cannot proceed.\n")
+  # Check if we have group information
+  if (!"Group" %in% colnames(design_matrix)) {
+    cat("No 'Group' column found in design matrix. Cannot proceed.\n")
     return(FALSE)
   }
   
-  cat(sprintf("Using column '%s' for SRA ID mapping\n", sra_column))
+  # Since we don't have a direct mapping between SRA IDs and GEO accession IDs,
+  # we'll need to use all samples in the normalized counts and assume they're in the same order
+  # as the samples in the design matrix
   
-  # Create a mapping between SRA IDs and sample names
-  sra_to_sample <- setNames(design_matrix$Sample_geo_accession, design_matrix[[sra_column]])
+  # Check if the number of samples in the counts matches the number of samples in the design matrix
+  if (ncol(counts) != nrow(design_matrix)) {
+    cat(sprintf("Number of samples in counts (%d) does not match number of samples in design matrix (%d). Cannot proceed.\n", 
+                ncol(counts), nrow(design_matrix)))
+    return(FALSE)
+  }
   
-  # Filter counts for samples that belong to this GSE
-  # We'll use all samples since they're already filtered by GSE in the normalization step
-  gse_counts <- counts
+  cat("Assuming samples in counts are in the same order as samples in design matrix.\n")
+  
+  # Create a mapping between sample indices and groups
+  groups <- design_matrix$Group
   
   # Create DGEList object
   cat("Creating DGEList object...\n")
-  y <- DGEList(counts = gse_counts)
+  y <- DGEList(counts = counts)
   
   # Filter low count genes
   cat("Filtering low count genes...\n")
@@ -216,129 +214,123 @@ perform_de_analysis <- function(gse_id) {
   # Create design matrix for edgeR
   cat("Creating design matrix for edgeR...\n")
   
-  # Check if we have group information
-  if ("Group" %in% colnames(design_matrix)) {
-    # Create factor from group information
-    group <- factor(design_matrix$Group)
+  # Create factor from group information
+  group_factor <- factor(groups)
+  
+  # Create design matrix
+  design <- model.matrix(~0 + group_factor)
+  colnames(design) <- levels(group_factor)
+  
+  # Estimate dispersion
+  cat("Estimating dispersion...\n")
+  y <- estimateDisp(y, design)
+  
+  # Plot dispersion
+  cat("Plotting dispersion...\n")
+  pdf(file.path(output_dir, paste0(gse_id, "_dispersion_plot.pdf")))
+  plotBCV(y)
+  dev.off()
+  
+  # Fit model
+  cat("Fitting model...\n")
+  fit <- glmQLFit(y, design)
+  
+  # Create contrasts for all pairwise comparisons
+  cat("Creating contrasts...\n")
+  groups <- levels(group_factor)
+  contrasts <- list()
+  
+  if (length(groups) > 1) {
+    for (i in 1:(length(groups) - 1)) {
+      for (j in (i + 1):length(groups)) {
+        contrast_name <- paste0(groups[j], "_vs_", groups[i])
+        contrasts[[contrast_name]] <- makeContrasts(
+          paste0("group_factor", groups[j], " - group_factor", groups[i]),
+          levels = design
+        )
+      }
+    }
+  }
+  
+  # Perform differential expression analysis for each contrast
+  results <- list()
+  
+  for (contrast_name in names(contrasts)) {
+    cat(sprintf("Testing contrast: %s\n", contrast_name))
     
-    # Create design matrix
-    design <- model.matrix(~0 + group)
-    colnames(design) <- levels(group)
+    # Test for differential expression
+    qlf <- glmQLFTest(fit, contrast = contrasts[[contrast_name]])
     
-    # Estimate dispersion
-    cat("Estimating dispersion...\n")
-    y <- estimateDisp(y, design)
+    # Get results
+    res <- topTags(qlf, n = Inf)
     
-    # Plot dispersion
-    cat("Plotting dispersion...\n")
-    pdf(file.path(output_dir, paste0(gse_id, "_dispersion_plot.pdf")))
-    plotBCV(y)
+    # Add to results list
+    results[[contrast_name]] <- res$table
+    
+    # Save results
+    res_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_de_results.txt"))
+    write.table(res$table, res_file, sep = "\t", quote = FALSE)
+    cat(sprintf("Saved results to: %s\n", res_file))
+    
+    # Create MA plot
+    cat(sprintf("Creating MA plot for %s...\n", contrast_name))
+    pdf(file.path(output_dir, paste0(gse_id, "_", contrast_name, "_ma_plot.pdf")))
+    plotMD(qlf)
+    abline(h = c(-1, 1), col = "blue")
     dev.off()
     
-    # Fit model
-    cat("Fitting model...\n")
-    fit <- glmQLFit(y, design)
-    
-    # Create contrasts for all pairwise comparisons
-    cat("Creating contrasts...\n")
-    groups <- levels(group)
-    contrasts <- list()
-    
-    if (length(groups) > 1) {
-      for (i in 1:(length(groups) - 1)) {
-        for (j in (i + 1):length(groups)) {
-          contrast_name <- paste0(groups[j], "_vs_", groups[i])
-          contrasts[[contrast_name]] <- makeContrasts(
-            paste0(group, groups[j], " - ", group, groups[i]),
-            levels = design
-          )
-        }
-      }
-    }
-    
-    # Perform differential expression analysis for each contrast
-    results <- list()
-    
-    for (contrast_name in names(contrasts)) {
-      cat(sprintf("Testing contrast: %s\n", contrast_name))
-      
-      # Test for differential expression
-      qlf <- glmQLFTest(fit, contrast = contrasts[[contrast_name]])
-      
-      # Get results
-      res <- topTags(qlf, n = Inf)
-      
-      # Add to results list
-      results[[contrast_name]] <- res$table
-      
-      # Save results
-      res_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_de_results.txt"))
-      write.table(res$table, res_file, sep = "\t", quote = FALSE)
-      cat(sprintf("Saved results to: %s\n", res_file))
-      
-      # Create MA plot
-      cat(sprintf("Creating MA plot for %s...\n", contrast_name))
-      pdf(file.path(output_dir, paste0(gse_id, "_", contrast_name, "_ma_plot.pdf")))
-      plotMD(qlf)
-      abline(h = c(-1, 1), col = "blue")
-      dev.off()
-      
-      # Create volcano plot
-      cat(sprintf("Creating volcano plot for %s...\n", contrast_name))
-      pdf(file.path(output_dir, paste0(gse_id, "_", contrast_name, "_volcano_plot.pdf")))
-      with(res$table, plot(logFC, -log10(FDR), pch = 20, main = paste("Volcano Plot:", contrast_name),
-                          xlim = c(-5, 5), ylim = c(0, 10)))
-      with(subset(res$table, FDR < 0.05 & abs(logFC) > 1), points(logFC, -log10(FDR), pch = 20, col = "red"))
-      abline(h = -log10(0.05), col = "blue", lty = 2)
-      abline(v = c(-1, 1), col = "blue", lty = 2)
-      dev.off()
-    }
-    
-    # Save all results
-    saveRDS(results, results_file)
-    cat(sprintf("Saved all results to: %s\n", results_file))
-    
-    # Create heatmap of differentially expressed genes
-    if (length(results) > 0) {
-      cat("Creating heatmap of differentially expressed genes...\n")
-      
-      # Get differentially expressed genes (FDR < 0.05 and |logFC| > 1)
-      de_genes <- list()
-      for (contrast_name in names(results)) {
-        de_genes[[contrast_name]] <- rownames(results[[contrast_name]])[
-          results[[contrast_name]]$FDR < 0.05 & abs(results[[contrast_name]]$logFC) > 1
-        ]
-      }
-      
-      # Get unique differentially expressed genes
-      all_de_genes <- unique(unlist(de_genes))
-      
-      if (length(all_de_genes) > 0) {
-        # Extract expression data for differentially expressed genes
-        de_expr <- y$counts[all_de_genes, ]
-        
-        # Scale for better visualization
-        de_expr_scaled <- t(scale(t(de_expr)))
-        
-        # Create heatmap
-        pdf(file.path(output_dir, paste0(gse_id, "_de_heatmap.pdf")))
-        pheatmap(de_expr_scaled, 
-                 main = "Differentially Expressed Genes",
-                 scale = "none",
-                 clustering_method = "ward.D2",
-                 show_rownames = FALSE)
-        dev.off()
-        cat(sprintf("Created heatmap with %d differentially expressed genes\n", length(all_de_genes)))
-      } else {
-        cat("No differentially expressed genes found for any contrast\n")
-      }
-    }
-    
-    return(TRUE)
-  } else {
-    cat("No group information found in design matrix. Cannot proceed with differential expression analysis.\n")
-    return(FALSE)
+    # Create volcano plot
+    cat(sprintf("Creating volcano plot for %s...\n", contrast_name))
+    pdf(file.path(output_dir, paste0(gse_id, "_", contrast_name, "_volcano_plot.pdf")))
+    with(res$table, plot(logFC, -log10(FDR), pch = 20, main = paste("Volcano Plot:", contrast_name),
+                        xlim = c(-5, 5), ylim = c(0, 10)))
+    with(subset(res$table, FDR < 0.05 & abs(logFC) > 1), points(logFC, -log10(FDR), pch = 20, col = "red"))
+    abline(h = -log10(0.05), col = "blue", lty = 2)
+    abline(v = c(-1, 1), col = "blue", lty = 2)
+    dev.off()
   }
+  
+  # Save all results
+  saveRDS(results, results_file)
+  cat(sprintf("Saved all results to: %s\n", results_file))
+  
+  # Create heatmap of differentially expressed genes
+  if (length(results) > 0) {
+    cat("Creating heatmap of differentially expressed genes...\n")
+    
+    # Get differentially expressed genes (FDR < 0.05 and |logFC| > 1)
+    de_genes <- list()
+    for (contrast_name in names(results)) {
+      de_genes[[contrast_name]] <- rownames(results[[contrast_name]])[
+        results[[contrast_name]]$FDR < 0.05 & abs(results[[contrast_name]]$logFC) > 1
+      ]
+    }
+    
+    # Get unique differentially expressed genes
+    all_de_genes <- unique(unlist(de_genes))
+    
+    if (length(all_de_genes) > 0) {
+      # Extract expression data for differentially expressed genes
+      de_expr <- y$counts[all_de_genes, ]
+      
+      # Scale for better visualization
+      de_expr_scaled <- t(scale(t(de_expr)))
+      
+      # Create heatmap
+      pdf(file.path(output_dir, paste0(gse_id, "_de_heatmap.pdf")))
+      pheatmap(de_expr_scaled, 
+               main = "Differentially Expressed Genes",
+               scale = "none",
+               clustering_method = "ward.D2",
+               show_rownames = FALSE)
+      dev.off()
+      cat(sprintf("Created heatmap with %d differentially expressed genes\n", length(all_de_genes)))
+    } else {
+      cat("No differentially expressed genes found for any contrast\n")
+    }
+  }
+  
+  return(TRUE)
 }
 
 # Main workflow
