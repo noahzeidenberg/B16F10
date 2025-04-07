@@ -3,8 +3,8 @@
 #SBATCH --time=00:20:00     # Longer time for processing all datasets
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12
-#SBATCH --mem=64G          # More memory for processing all datasets
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G          # More memory for processing all datasets
 #SBATCH --job-name=batch_correction
 #SBATCH --output=logs/batch_correction/batch_correction_%j.out
 #SBATCH --error=logs/batch_correction/batch_correction_%j.err
