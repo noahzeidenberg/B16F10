@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=04:00:00     # Less time needed for normalization
+#SBATCH --time=00:30:00     # Less time needed for normalization
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=64G           # Less memory needed for normalization
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G           # Less memory needed for normalization
 #SBATCH --job-name=normalization
 #SBATCH --output=logs/normalization/normalization_%j.out
 #SBATCH --error=logs/normalization/normalization_%j.err
