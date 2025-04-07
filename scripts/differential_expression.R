@@ -50,8 +50,21 @@ perform_de_analysis <- function(gse_id) {
     return(FALSE)
   }
   
-  design_dir <- file.path(base_dir, "results", "design_matrices")
+  # Updated design matrix path
+  design_dir <- file.path(base_dir, "results", "design_matrices", "sample_design", "sample_design", "design_matrices")
   cat(sprintf("Design directory: %s\n", design_dir))
+  
+  # Check if design directory exists
+  if (!dir.exists(design_dir)) {
+    cat(sprintf("Design directory %s does not exist. Trying alternative path...\n", design_dir))
+    # Try alternative path
+    design_dir <- file.path(base_dir, "results", "design_matrices")
+    if (!dir.exists(design_dir)) {
+      cat(sprintf("Alternative design directory %s does not exist. Cannot proceed.\n", design_dir))
+      return(FALSE)
+    }
+    cat(sprintf("Using alternative design directory: %s\n", design_dir))
+  }
   
   output_dir <- file.path(gse_dir, "results", "differential_expression")
   cat(sprintf("Output directory: %s\n", output_dir))
@@ -100,19 +113,7 @@ perform_de_analysis <- function(gse_id) {
   cat("Sample names:\n")
   cat(paste(samples, collapse = ", "), "\n")
   
-  # Filter counts for the specific GSE ID
-  gse_samples <- samples[grep(paste0("^", gse_id, "_"), samples)]
-  cat(sprintf("Found %d samples for GSE ID %s\n", length(gse_samples), gse_id))
-  
-  if (length(gse_samples) == 0) {
-    cat(sprintf("No samples found for %s in normalized data. Cannot proceed.\n", gse_id))
-    return(FALSE)
-  }
-  
-  # Extract counts for this GSE
-  gse_counts <- counts[, gse_samples, drop = FALSE]
-  
-  # Load design matrix
+  # Load design matrix first to get the mapping between SRA IDs and GSE ID
   design_file <- file.path(design_dir, paste0(gse_id, "_design_matrix.txt"))
   cat(sprintf("Looking for design matrix at: %s\n", design_file))
   
@@ -124,11 +125,39 @@ perform_de_analysis <- function(gse_id) {
   cat("Loading design matrix...\n")
   design_matrix <- read.table(design_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
   
+  # Print design matrix structure for debugging
+  cat("Structure of design matrix:\n")
+  str(design_matrix)
+  
   # Check if we have the necessary data
-  if (is.null(gse_counts) || nrow(gse_counts) == 0) {
+  if (is.null(counts) || nrow(counts) == 0) {
     cat("No counts found. Cannot proceed.\n")
     return(FALSE)
   }
+  
+  # Create a mapping between SRA IDs and sample names in the design matrix
+  # This assumes that the design matrix has a column with SRA IDs
+  sra_column <- NULL
+  for (col in colnames(design_matrix)) {
+    if (any(grepl("^SRR", design_matrix[[col]]))) {
+      sra_column <- col
+      break
+    }
+  }
+  
+  if (is.null(sra_column)) {
+    cat("Could not find a column with SRA IDs in the design matrix. Cannot proceed.\n")
+    return(FALSE)
+  }
+  
+  cat(sprintf("Using column '%s' for SRA ID mapping\n", sra_column))
+  
+  # Create a mapping between SRA IDs and sample names
+  sra_to_sample <- setNames(design_matrix$Sample_geo_accession, design_matrix[[sra_column]])
+  
+  # Filter counts for samples that belong to this GSE
+  # We'll use all samples since they're already filtered by GSE in the normalization step
+  gse_counts <- counts
   
   # Create DGEList object
   cat("Creating DGEList object...\n")
