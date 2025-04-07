@@ -58,6 +58,9 @@ load_gene_lengths <- function(gtf_file) {
   # Remove duplicates
   gene_lengths <- gene_lengths[!duplicated(gene_lengths$gene_id), ]
   
+  # Remove any "gene_id " prefix from gene IDs if present
+  gene_lengths$gene_id <- gsub("^gene_id ", "", gene_lengths$gene_id)
+  
   cat(sprintf("Loaded %d gene lengths\n", nrow(gene_lengths)))
   return(gene_lengths)
 }
@@ -92,7 +95,25 @@ normalize_counts <- function(counts, gene_lengths, output_dir) {
   if (length(common_genes) == 0) {
     cat("Error: No common genes found between counts and gene lengths\n")
     cat("This might be due to different gene ID formats\n")
-    return(NULL)
+    
+    # Try to clean up gene IDs in both datasets
+    cat("Attempting to clean up gene IDs...\n")
+    
+    # Clean up counts row names
+    clean_counts_rownames <- gsub("^gene_id ", "", rownames(counts))
+    rownames(counts) <- clean_counts_rownames
+    
+    # Clean up gene lengths gene IDs
+    clean_gene_lengths_ids <- gsub("^gene_id ", "", gene_lengths$gene_id)
+    gene_lengths$gene_id <- clean_gene_lengths_ids
+    
+    # Try matching again
+    common_genes <- intersect(rownames(counts), gene_lengths$gene_id)
+    cat(sprintf("After cleanup: Found %d common genes\n", length(common_genes)))
+    
+    if (length(common_genes) == 0) {
+      return(NULL)
+    }
   }
   
   # Filter counts and gene lengths
