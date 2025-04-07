@@ -24,6 +24,69 @@ for (pkg in required_packages) {
   library(pkg, character.only = TRUE)
 }
 
+# Function to find design matrix file
+find_design_matrix <- function(base_dir, gse_id) {
+  cat(sprintf("Searching for design matrix for %s...\n", gse_id))
+  
+  # List of possible design matrix locations
+  possible_locations <- c(
+    file.path(base_dir, "results", "design_matrices", paste0(gse_id, "_design_matrix.txt")),
+    file.path(base_dir, "results", "design_matrices", "sample_design", "sample_design", "design_matrices", paste0(gse_id, "_design_matrix.txt")),
+    file.path(base_dir, "results", "design_matrices", "sample_design", "design_matrices", paste0(gse_id, "_design_matrix.txt")),
+    file.path(base_dir, gse_id, "results", "design_matrices", paste0(gse_id, "_design_matrix.txt")),
+    file.path(base_dir, gse_id, "design_matrices", paste0(gse_id, "_design_matrix.txt")),
+    # Add the correct path
+    file.path(base_dir, "sample_design", "sample_design", "design_matrices", paste0(gse_id, "_design_matrix.txt")),
+    # Also check the absolute path
+    "/home/nzeidenb/scratch/B16F10/sample_design/sample_design/design_matrices/GSE287957_design_matrix.txt"
+  )
+  
+  # Check each location
+  for (location in possible_locations) {
+    cat(sprintf("Checking location: %s\n", location))
+    if (file.exists(location)) {
+      cat(sprintf("Found design matrix at: %s\n", location))
+      return(location)
+    }
+  }
+  
+  # If not found, try to find any file with the GSE ID in the name
+  cat("Design matrix not found in expected locations. Searching for any file with GSE ID...\n")
+  
+  # Search in results/design_matrices
+  design_dir <- file.path(base_dir, "results", "design_matrices")
+  if (dir.exists(design_dir)) {
+    design_files <- list.files(design_dir, pattern = gse_id, full.names = TRUE)
+    if (length(design_files) > 0) {
+      cat(sprintf("Found potential design matrix files: %s\n", paste(design_files, collapse = ", ")))
+      return(design_files[1])  # Return the first match
+    }
+  }
+  
+  # Search in sample_design directory
+  sample_design_dir <- file.path(base_dir, "sample_design", "sample_design", "design_matrices")
+  if (dir.exists(sample_design_dir)) {
+    design_files <- list.files(sample_design_dir, pattern = gse_id, full.names = TRUE)
+    if (length(design_files) > 0) {
+      cat(sprintf("Found potential design matrix files in sample_design directory: %s\n", paste(design_files, collapse = ", ")))
+      return(design_files[1])  # Return the first match
+    }
+  }
+  
+  # Search in GSE directory
+  gse_dir <- file.path(base_dir, gse_id)
+  if (dir.exists(gse_dir)) {
+    design_files <- list.files(gse_dir, pattern = "design_matrix", recursive = TRUE, full.names = TRUE)
+    if (length(design_files) > 0) {
+      cat(sprintf("Found potential design matrix files in GSE directory: %s\n", paste(design_files, collapse = ", ")))
+      return(design_files[1])  # Return the first match
+    }
+  }
+  
+  cat("No design matrix found for GSE ID. Cannot proceed.\n")
+  return(NULL)
+}
+
 # Function to perform differential expression analysis
 perform_de_analysis <- function(gse_id) {
   cat(sprintf("Performing differential expression analysis for %s...\n", gse_id))
@@ -48,22 +111,6 @@ perform_de_analysis <- function(gse_id) {
   if (!dir.exists(normalization_dir)) {
     cat(sprintf("Normalization directory %s does not exist. Cannot proceed.\n", normalization_dir))
     return(FALSE)
-  }
-  
-  # Updated design matrix path
-  design_dir <- file.path(base_dir, "results", "design_matrices", "sample_design", "sample_design", "design_matrices")
-  cat(sprintf("Design directory: %s\n", design_dir))
-  
-  # Check if design directory exists
-  if (!dir.exists(design_dir)) {
-    cat(sprintf("Design directory %s does not exist. Trying alternative path...\n", design_dir))
-    # Try alternative path
-    design_dir <- file.path(base_dir, "results", "design_matrices")
-    if (!dir.exists(design_dir)) {
-      cat(sprintf("Alternative design directory %s does not exist. Cannot proceed.\n", design_dir))
-      return(FALSE)
-    }
-    cat(sprintf("Using alternative design directory: %s\n", design_dir))
   }
   
   output_dir <- file.path(gse_dir, "results", "differential_expression")
@@ -113,12 +160,9 @@ perform_de_analysis <- function(gse_id) {
   cat("Sample names:\n")
   cat(paste(samples, collapse = ", "), "\n")
   
-  # Load design matrix first to get the mapping between SRA IDs and GSE ID
-  design_file <- file.path(design_dir, paste0(gse_id, "_design_matrix.txt"))
-  cat(sprintf("Looking for design matrix at: %s\n", design_file))
-  
-  if (!file.exists(design_file)) {
-    cat(sprintf("Design matrix not found for %s. Cannot proceed.\n", gse_id))
+  # Find design matrix file
+  design_file <- find_design_matrix(base_dir, gse_id)
+  if (is.null(design_file)) {
     return(FALSE)
   }
   
