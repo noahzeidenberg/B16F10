@@ -30,9 +30,10 @@ perform_de_analysis <- function(gse_id) {
   
   # Set up directories
   base_dir <- getwd()
-  normalization_dir <- file.path(base_dir, "results", "normalization")
+  gse_dir <- file.path(base_dir, gse_id)
+  normalization_dir <- file.path(gse_dir, "results", "normalization")
   design_dir <- file.path(base_dir, "results", "design_matrices")
-  output_dir <- file.path(base_dir, "results", "differential_expression")
+  output_dir <- file.path(gse_dir, "results", "differential_expression")
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
   
   # Check if analysis has already been performed
@@ -45,7 +46,7 @@ perform_de_analysis <- function(gse_id) {
   # Load normalized counts
   normalized_file <- file.path(normalization_dir, "normalized_counts.rds")
   if (!file.exists(normalized_file)) {
-    cat(sprintf("Normalized counts not found. Cannot proceed.\n"))
+    cat(sprintf("Normalized counts not found at %s. Cannot proceed.\n", normalized_file))
     return(FALSE)
   }
   
