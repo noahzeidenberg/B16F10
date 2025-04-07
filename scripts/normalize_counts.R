@@ -157,14 +157,25 @@ normalize_counts <- function(counts, gene_lengths, output_dir) {
 }
 
 # Main workflow
-main <- function() {
+main <- function(gse_id = NULL) {
   # Set up directories
   base_dir <- getwd()
-  batch_correction_dir <- file.path(base_dir, "results", "batch_correction")
-  output_dir <- file.path(base_dir, "results", "normalization")
+  
+  # Check if GSE ID is provided
+  if (is.null(gse_id)) {
+    cat("Error: GSE ID is required\n")
+    cat("Usage: Rscript normalize_counts.R <GSE_ID>\n")
+    return(1)
+  }
+  
+  # Create GSE-specific directories
+  gse_dir <- file.path(base_dir, gse_id)
+  batch_correction_dir <- file.path(gse_dir, "results", "batch_correction")
+  output_dir <- file.path(gse_dir, "results", "normalization")
   
   cat("Setting up directories...\n")
   cat(sprintf("Base directory: %s\n", base_dir))
+  cat(sprintf("GSE directory: %s\n", gse_dir))
   cat(sprintf("Output directory: %s\n", output_dir))
   
   # Check if normalization has already been performed
@@ -253,5 +264,19 @@ main <- function() {
 
 # Run the main function if this script is being run directly
 if (sys.nframe() == 0) {
-  quit(status = main())
+  # Get command line arguments
+  args <- commandArgs(trailingOnly = TRUE)
+  
+  # Check if GSE ID is provided
+  if (length(args) < 1) {
+    cat("Error: GSE ID is required\n")
+    cat("Usage: Rscript normalize_counts.R <GSE_ID>\n")
+    quit(status = 1)
+  }
+  
+  # Extract GSE ID from arguments
+  gse_id <- args[1]
+  
+  # Run main function with GSE ID
+  quit(status = main(gse_id))
 } 
