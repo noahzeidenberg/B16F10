@@ -37,8 +37,8 @@ find_design_matrix <- function(base_dir, gse_id) {
     file.path(base_dir, gse_id, "design_matrices", paste0(gse_id, "_design_matrix.txt")),
     # Add the correct path
     file.path(base_dir, "sample_design", "sample_design", "design_matrices", paste0(gse_id, "_design_matrix.txt")),
-    # Also check the absolute path
-    "/home/nzeidenb/scratch/B16F10/sample_design/sample_design/design_matrices/GSE287957_design_matrix.txt"
+    # Also check the absolute path with the correct base directory
+    file.path(path.expand("~/scratch/B16F10"), "sample_design", "sample_design", "design_matrices", paste0(gse_id, "_design_matrix.txt"))
   )
   
   # Check each location
@@ -92,7 +92,8 @@ perform_de_analysis <- function(gse_id) {
   cat(sprintf("Performing differential expression analysis for %s...\n", gse_id))
   
   # Set up directories
-  base_dir <- getwd()
+  # Use path.expand to properly handle the tilde in the path
+  base_dir <- path.expand("~/scratch/B16F10")
   cat(sprintf("Base directory: %s\n", base_dir))
   
   gse_dir <- file.path(base_dir, gse_id)
