@@ -104,8 +104,27 @@ collect_feature_counts <- function(base_dir, design_matrices) {
           match_idx <- which(design_matrix$Sample_geo_accession == sample_id)
           if (length(match_idx) > 0) {
             groups[i] <- design_matrix$Group[match_idx]
+          } else {
+            # Try to match without the GSE prefix if it exists in the sample ID
+            if (grepl("^GSM", sample_id)) {
+              match_idx <- which(design_matrix$Sample_geo_accession == sample_id)
+              if (length(match_idx) > 0) {
+                groups[i] <- design_matrix$Group[match_idx]
+              }
+            }
           }
         }
+        
+        # Print matching information for debugging
+        cat(sprintf("  Matched %d/%d samples to groups for %s\n", 
+                   sum(!is.na(groups)), length(samples), gse_id))
+        if (sum(!is.na(groups)) < length(samples)) {
+          cat("  Unmatched samples: ")
+          cat(paste(samples[is.na(groups)], collapse=", "))
+          cat("\n")
+        }
+      } else {
+        cat(sprintf("  No design matrix found for %s\n", gse_id))
       }
       
       # Add to lists
@@ -134,6 +153,11 @@ collect_feature_counts <- function(base_dir, design_matrices) {
     group = all_groups,
     batch = factor(all_gse_ids)  # Each GSE is a batch
   )
+  
+  # Print summary of group information
+  cat("\nGroup information summary:\n")
+  group_summary <- table(batch_info$group, useNA="ifany")
+  print(group_summary)
   
   return(list(
     counts = combined_counts,
@@ -177,6 +201,12 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       # Create a group factor
       group_factor <- factor(batch_info$group)
       
+      # Print group information for debugging
+      cat("Group factor levels:\n")
+      print(levels(group_factor))
+      cat("Group factor summary:\n")
+      print(table(group_factor, useNA="ifany"))
+      
       # ComBat-seq batch correction with group information
       corrected_counts <- ComBat_seq(counts = as.matrix(counts),
                                     batch = batch_info$batch,
@@ -186,6 +216,15 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       # ComBat-seq batch correction without group information
       corrected_counts <- ComBat_seq(counts = as.matrix(counts),
                                     batch = batch_info$batch)
+    }
+    
+    # Check if correction made any changes
+    if (identical(as.matrix(counts), corrected_counts)) {
+      cat("Warning: Batch correction did not change the counts. This might indicate an issue with the correction process.\n")
+    } else {
+      # Calculate the difference between raw and corrected counts
+      diff_counts <- sum(abs(as.matrix(counts) - corrected_counts))
+      cat(sprintf("Total absolute difference between raw and corrected counts: %f\n", diff_counts))
     }
   } else {
     # Skip batch correction if we only have one batch

@@ -186,21 +186,59 @@ perform_de_analysis <- function(gse_id) {
     return(FALSE)
   }
   
-  # Since we don't have a direct mapping between SRA IDs and GEO accession IDs,
-  # we'll need to use all samples in the normalized counts and assume they're in the same order
-  # as the samples in the design matrix
+  # Create a mapping between SRA IDs and GEO accession IDs
+  # This is a simplified approach - in a real scenario, you might need a more robust mapping
+  cat("Creating mapping between SRA IDs and GEO accession IDs...\n")
   
-  # Check if the number of samples in the counts matches the number of samples in the design matrix
-  if (ncol(counts) != nrow(design_matrix)) {
-    cat(sprintf("Number of samples in counts (%d) does not match number of samples in design matrix (%d). Cannot proceed.\n", 
-                ncol(counts), nrow(design_matrix)))
-    return(FALSE)
+  # Extract SRA IDs from the sample names (assuming format like SRR12345678_Aligned.sortedByCoord.out.bam)
+  sra_ids <- gsub("_Aligned.sortedByCoord.out.bam", "", samples)
+  cat("Extracted SRA IDs:\n")
+  cat(paste(sra_ids, collapse = ", "), "\n")
+  
+  # Try to find a mapping file
+  mapping_file <- file.path(base_dir, "sample_design", "sample_design", "sra_to_geo_mapping.txt")
+  if (file.exists(mapping_file)) {
+    cat(sprintf("Found mapping file at: %s\n", mapping_file))
+    mapping <- read.table(mapping_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+    
+    # Check if we have the necessary columns
+    if ("SRA_ID" %in% colnames(mapping) && "GEO_ID" %in% colnames(mapping)) {
+      cat("Mapping file has required columns.\n")
+      
+      # Filter mapping to only include SRA IDs in our samples
+      mapping <- mapping[mapping$SRA_ID %in% sra_ids, ]
+      
+      if (nrow(mapping) > 0) {
+        cat(sprintf("Found %d mappings between SRA IDs and GEO IDs.\n", nrow(mapping)))
+        
+        # Filter design matrix to only include GEO IDs in our mapping
+        design_matrix <- design_matrix[design_matrix$Sample_geo_accession %in% mapping$GEO_ID, ]
+        
+        if (nrow(design_matrix) > 0) {
+          cat(sprintf("Filtered design matrix to %d samples.\n", nrow(design_matrix)))
+        } else {
+          cat("No matching GEO IDs found in design matrix. Cannot proceed.\n")
+          return(FALSE)
+        }
+      } else {
+        cat("No matching SRA IDs found in mapping file. Cannot proceed.\n")
+        return(FALSE)
+      }
+    } else {
+      cat("Mapping file does not have required columns. Cannot proceed.\n")
+      return(FALSE)
+    }
+  } else {
+    cat("No mapping file found. Attempting to use all samples in design matrix...\n")
+    
+    # If we don't have a mapping file, we'll try to use all samples in the design matrix
+    # This is a fallback approach and might not work in all cases
+    if (ncol(counts) != nrow(design_matrix)) {
+      cat(sprintf("Number of samples in counts (%d) does not match number of samples in design matrix (%d). Cannot proceed.\n", 
+                  ncol(counts), nrow(design_matrix)))
+      return(FALSE)
+    }
   }
-  
-  cat("Assuming samples in counts are in the same order as samples in design matrix.\n")
-  
-  # Create a mapping between sample indices and groups
-  groups <- design_matrix$Group
   
   # Create DGEList object
   cat("Creating DGEList object...\n")
@@ -216,7 +254,7 @@ perform_de_analysis <- function(gse_id) {
   cat("Creating design matrix for edgeR...\n")
   
   # Create factor from group information
-  group_factor <- factor(groups)
+  group_factor <- factor(design_matrix$Group)
   
   # Create design matrix
   design <- model.matrix(~0 + group_factor)

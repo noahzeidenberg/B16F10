@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --account=def-lukens
-#SBATCH --time=12:00:00     # Longer time for processing all datasets
+#SBATCH --time=00:20:00     # Longer time for processing all datasets
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=128G          # More memory for processing all datasets
+#SBATCH --mem=64G          # More memory for processing all datasets
 #SBATCH --job-name=batch_correction
 #SBATCH --output=logs/batch_correction/batch_correction_%j.out
 #SBATCH --error=logs/batch_correction/batch_correction_%j.err

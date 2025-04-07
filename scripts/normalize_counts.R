@@ -157,9 +157,9 @@ normalize_counts <- function(counts, gene_lengths, output_dir) {
 }
 
 # Main workflow
-main <- function(gse_id) {
+main <- function() {
   # Set up directories
-  base_dir <- file.path(getwd(), gse_id)
+  base_dir <- getwd()
   batch_correction_dir <- file.path(base_dir, "results", "batch_correction")
   output_dir <- file.path(base_dir, "results", "normalization")
   
@@ -179,15 +179,8 @@ main <- function(gse_id) {
     cat("Batch-corrected counts not found, cannot proceed\n")
     return(1)
   }
-
-  # Load non-batch corrected counts from feature counts # now using batch corrected counts
-  # batch_corrected_file <- file.path(base_dir, "results", "counts", "feature_counts.rds")
-  # if (!file.exists(batch_corrected_file)) {
-  #   cat("Feature counts not found, cannot proceed\n")
-  #   return(1)
-  # }
   
-  cat("Loading feature counts...\n")
+  cat("Loading batch-corrected counts...\n")
   feature_counts <- readRDS(batch_corrected_file)
   
   # Check if the feature counts object is valid
@@ -197,19 +190,19 @@ main <- function(gse_id) {
   }
   
   # Extract the counts matrix from the feature counts object
-  # The structure depends on how process_rnaseq.R saved it
-  if (is.list(feature_counts) && !is.null(feature_counts$counts)) {
-    # If it's a list with a 'counts' field (standard featureCounts output)
+  # The structure depends on how batch_correction.R saved it
+  if (is.list(feature_counts) && !is.null(feature_counts$corrected_counts)) {
+    # If it's a list with a 'corrected_counts' field (batch-corrected counts)
+    counts_matrix <- feature_counts$corrected_counts
+    cat("Using counts from feature_counts$corrected_counts\n")
+  } else if (is.list(feature_counts) && !is.null(feature_counts$counts)) {
+    # If it's a list with a 'counts' field
     counts_matrix <- feature_counts$counts
     cat("Using counts from feature_counts$counts\n")
   } else if (is.matrix(feature_counts)) {
     # If it's already a matrix
     counts_matrix <- feature_counts
     cat("Using counts directly from feature_counts (matrix)\n")
-  } else if (is.list(feature_counts) && !is.null(feature_counts$corrected_counts)) {
-    # If it's a list with a 'corrected_counts' field (batch-corrected counts)
-    counts_matrix <- feature_counts$corrected_counts
-    cat("Using counts from feature_counts$corrected_counts\n")
   } else {
     # Try to extract counts from the object
     cat("Attempting to extract counts from feature_counts object...\n")
@@ -260,16 +253,5 @@ main <- function(gse_id) {
 
 # Run the main function if this script is being run directly
 if (sys.nframe() == 0) {
-  # Check if GSE ID is provided as a command-line argument
-  args <- commandArgs(trailingOnly = TRUE)
-  if (length(args) < 1) {
-    cat("Error: GSE ID not provided\n")
-    cat("Usage: Rscript normalize_counts.R <GSE_ID>\n")
-    cat("Example: Rscript normalize_counts.R GSE287957\n")
-    quit(status = 1)
-  }
-  
-  gse_id <- args[1]
-  cat(sprintf("Processing GSE ID: %s\n", gse_id))
-  quit(status = main(gse_id))
+  quit(status = main())
 } 
