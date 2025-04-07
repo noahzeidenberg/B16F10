@@ -47,11 +47,12 @@ create_srr_gsm_mapping <- function(base_dir) {
         # Look for SRA directory
         sra_dir <- file.path(sample_dir, "SRA")
         if (dir.exists(sra_dir)) {
-          # Look for SRA files
-          sra_files <- list.files(sra_dir, pattern = "\\.sra$", full.names = TRUE)
+          # Look for SRR directories (folders starting with SRR)
+          srr_dirs <- list.dirs(sra_dir, recursive = FALSE)
+          srr_dirs <- srr_dirs[grep("^SRR", basename(srr_dirs))]
           
-          for (sra_file in sra_files) {
-            srr_id <- gsub("\\.sra$", "", basename(sra_file))
+          for (srr_dir in srr_dirs) {
+            srr_id <- basename(srr_dir)
             
             # Add to mapping
             srr_to_gsm[[srr_id]] <- gsm_id
