@@ -26,15 +26,28 @@ for (pkg in required_packages) {
 create_srr_gsm_mapping <- function(base_dir) {
   cat("Creating SRR to GSM mapping...\n")
   
-  # Find all GSE directories
-  gse_dirs <- list.dirs(base_dir, recursive = FALSE)
-  gse_dirs <- gse_dirs[grep("^GSE", basename(gse_dirs))]
+  # Read GSE IDs from the file
+  gse_ids_file <- file.path(base_dir, "rna_seq_gse_ids.txt")
+  if (!file.exists(gse_ids_file)) {
+    cat(sprintf("Error: GSE IDs file not found at %s\n", gse_ids_file))
+    return(NULL)
+  }
+  
+  # Read the GSE IDs
+  gse_ids <- readLines(gse_ids_file)
+  cat(sprintf("Read %d GSE IDs from %s\n", length(gse_ids), gse_ids_file))
   
   # Create a mapping from SRR to GSM
   srr_to_gsm <- list()
   
-  for (gse_dir in gse_dirs) {
-    gse_id <- basename(gse_dir)
+  for (gse_id in gse_ids) {
+    gse_dir <- file.path(base_dir, gse_id)
+    
+    # Skip if directory doesn't exist
+    if (!dir.exists(gse_dir)) {
+      cat(sprintf("Warning: Directory for %s does not exist, skipping\n", gse_id))
+      next
+    }
     
     # Find all sample directories
     sample_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
@@ -147,11 +160,16 @@ load_design_matrices <- function(design_dir) {
 collect_feature_counts <- function(base_dir, design_matrices, srr_to_gsm) {
   cat("Collecting all feature counts files...\n")
   
-  # Find all GSE directories
-  gse_dirs <- list.dirs(base_dir, recursive = FALSE)
-  gse_dirs <- gse_dirs[grep("^GSE", basename(gse_dirs))]
+  # Read GSE IDs from the file
+  gse_ids_file <- file.path(base_dir, "rna_seq_gse_ids.txt")
+  if (!file.exists(gse_ids_file)) {
+    cat(sprintf("Error: GSE IDs file not found at %s\n", gse_ids_file))
+    return(NULL)
+  }
   
-  cat(sprintf("Found %d GSE directories\n", length(gse_dirs)))
+  # Read the GSE IDs
+  gse_ids <- readLines(gse_ids_file)
+  cat(sprintf("Read %d GSE IDs from %s\n", length(gse_ids), gse_ids_file))
   
   # Collect all feature counts files
   all_counts <- list()
@@ -159,8 +177,15 @@ collect_feature_counts <- function(base_dir, design_matrices, srr_to_gsm) {
   all_gse_ids <- c()
   all_groups <- c()
   
-  for (gse_dir in gse_dirs) {
-    gse_id <- basename(gse_dir)
+  for (gse_id in gse_ids) {
+    gse_dir <- file.path(base_dir, gse_id)
+    
+    # Skip if directory doesn't exist
+    if (!dir.exists(gse_dir)) {
+      cat(sprintf("Warning: Directory for %s does not exist, skipping\n", gse_id))
+      next
+    }
+    
     counts_file <- file.path(gse_dir, "results", "counts", "feature_counts.rds")
     
     if (file.exists(counts_file)) {
@@ -344,16 +369,86 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       # Initialize treatment factor
       treatment_factor <- rep("treatment", nrow(batch_info))
       
-      # Identify control groups
+      # Identify control groups - improved approach
+      control_groups <- c()
       for (group in all_groups) {
         group_lower <- tolower(group)
-        is_control <- any(sapply(control_patterns, function(pattern) grepl(pattern, group_lower)))
         
-        if (is_control) {
-          cat(sprintf("Identified control group: %s\n", group))
+        # Check for exact matches first
+        if (group_lower %in% c("control", "ctrl", "untreated", "vehicle", "sham", "wt", "wild type")) {
+          cat(sprintf("Exact match for control group: %s\n", group))
+          control_groups <- c(control_groups, group)
           treatment_factor[batch_info$group == group] <- "control"
+          next
+        }
+        
+        # Check for pattern matches
+        is_control <- FALSE
+        for (pattern in control_patterns) {
+          if (grepl(pattern, group_lower, perl = TRUE)) {
+            cat(sprintf("Pattern match for control group: %s (matched pattern: %s)\n", group, pattern))
+            control_groups <- c(control_groups, group)
+            treatment_factor[batch_info$group == group] <- "control"
+            is_control <- TRUE
+            break
+          }
+        }
+        
+        if (!is_control) {
+          cat(sprintf("Treatment group: %s\n", group))
         }
       }
+      
+      # If no control groups were identified, try a more aggressive approach
+      if (length(control_groups) == 0) {
+        cat("No control groups identified with standard patterns. Trying alternative approach...\n")
+        
+        # Try to identify control groups based on common experimental design patterns
+        # Often the first group in each batch is a control
+        for (batch in unique(batch_info$batch)) {
+          batch_samples <- batch_info$batch == batch
+          batch_groups <- unique(batch_info$group[batch_samples])
+          
+          if (length(batch_groups) > 0) {
+            # Assume the first group is a control
+            control_group <- batch_groups[1]
+            cat(sprintf("Assuming first group in batch %s is control: %s\n", batch, control_group))
+            control_groups <- c(control_groups, control_group)
+            treatment_factor[batch_info$group == control_group] <- "control"
+          }
+        }
+      }
+      
+      # If still no control groups, use a manual approach
+      if (length(control_groups) == 0) {
+        cat("Still no control groups identified. Using manual approach...\n")
+        
+        # For each batch, try to identify a control group
+        for (batch in unique(batch_info$batch)) {
+          batch_samples <- batch_info$batch == batch
+          batch_groups <- unique(batch_info$group[batch_samples])
+          
+          # Ask the user to identify control groups
+          cat(sprintf("Batch %s has the following groups:\n", batch))
+          for (i in 1:length(batch_groups)) {
+            cat(sprintf("  %d: %s\n", i, batch_groups[i]))
+          }
+          
+          # For now, we'll use a heuristic: assume groups with "control" in the name are controls
+          # In a real implementation, you might want to prompt the user
+          for (group in batch_groups) {
+            if (grepl("control", tolower(group))) {
+              cat(sprintf("Manually identified control group: %s\n", group))
+              control_groups <- c(control_groups, group)
+              treatment_factor[batch_info$group == group] <- "control"
+            }
+          }
+        }
+      }
+      
+      # Print identified control groups
+      cat("Identified control groups:\n")
+      print(control_groups)
       
       # Convert to factor
       treatment_factor <- factor(treatment_factor, levels = c("control", "treatment"))
@@ -361,6 +456,12 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       # Print treatment factor summary
       cat("Treatment factor summary:\n")
       print(table(treatment_factor))
+      
+      # Check if we have both control and treatment samples
+      if (length(unique(treatment_factor)) < 2) {
+        cat("Error: Could not identify both control and treatment groups. Cannot proceed with batch correction.\n")
+        return(NULL)
+      }
       
       # Create a model matrix for the treatment factor
       # This will preserve the contrast between control and treatment
@@ -382,10 +483,19 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       
       # ComBat-seq batch correction with model matrix
       # Set group=NULL as we're using mod to preserve treatment differences
+      cat("Running ComBat-seq with model matrix...\n")
       corrected_counts <- ComBat_seq(counts = counts_matrix,
                                     batch = batch_factor,
                                     group = NULL,
                                     mod = mod)
+      
+      # Print a sample of the raw and corrected counts for comparison
+      cat("Sample comparison of raw vs. corrected counts (first 5 genes, first 5 samples):\n")
+      sample_comparison <- data.frame(
+        raw = counts_matrix[1:min(5, nrow(counts_matrix)), 1:min(5, ncol(counts_matrix))],
+        corrected = corrected_counts[1:min(5, nrow(corrected_counts)), 1:min(5, ncol(corrected_counts))]
+      )
+      print(sample_comparison)
     } else {
       cat("Performing ComBat-seq batch correction without group information...\n")
       # Ensure counts is a matrix
@@ -406,6 +516,27 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
     # Check if correction made any changes
     if (identical(as.matrix(counts), corrected_counts)) {
       cat("Warning: Batch correction did not change the counts. This might indicate an issue with the correction process.\n")
+      
+      # Try an alternative approach if the first one didn't work
+      cat("Trying alternative batch correction approach...\n")
+      
+      # Create a simple model matrix with just an intercept
+      simple_mod <- matrix(1, nrow = ncol(counts_matrix), ncol = 1)
+      
+      # Run ComBat-seq with the simple model matrix
+      corrected_counts <- ComBat_seq(counts = counts_matrix,
+                                    batch = batch_factor,
+                                    group = NULL,
+                                    mod = simple_mod)
+      
+      # Check again if correction made any changes
+      if (identical(as.matrix(counts), corrected_counts)) {
+        cat("Warning: Alternative batch correction also did not change the counts.\n")
+      } else {
+        # Calculate the difference between raw and corrected counts
+        diff_counts <- sum(abs(as.matrix(counts) - corrected_counts))
+        cat(sprintf("Total absolute difference between raw and corrected counts: %f\n", diff_counts))
+      }
     } else {
       # Calculate the difference between raw and corrected counts
       diff_counts <- sum(abs(as.matrix(counts) - corrected_counts))
