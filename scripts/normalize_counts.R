@@ -170,7 +170,7 @@ main <- function(gse_id = NULL) {
   
   # Create GSE-specific directories
   gse_dir <- file.path(base_dir, gse_id)
-  batch_correction_dir <- file.path(gse_dir, "results", "batch_correction")
+  batch_correction_dir <- file.path(base_dir, "results", "batch_correction")
   output_dir <- file.path(gse_dir, "results", "normalization")
   
   cat("Setting up directories...\n")
