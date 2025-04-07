@@ -166,13 +166,50 @@ main <- function(gse_id) {
     return(1)
   }
   
-  cat("Loading batch-corrected counts...\n")
-  batch_corrected <- readRDS(batch_corrected_file)
+  cat("Loading feature counts...\n")
+  feature_counts <- readRDS(batch_corrected_file)
   
-  # Check if the counts data exists and is not NULL
-  if (is.null(batch_corrected) || is.null(batch_corrected$corrected_counts)) {
-    cat("Error: Counts data is NULL or missing in the loaded RDS file\n")
+  # Check if the feature counts object is valid
+  if (is.null(feature_counts)) {
+    cat("Error: Feature counts object is NULL\n")
     return(1)
+  }
+  
+  # Extract the counts matrix from the feature counts object
+  # The structure depends on how process_rnaseq.R saved it
+  if (is.list(feature_counts) && !is.null(feature_counts$counts)) {
+    # If it's a list with a 'counts' field (standard featureCounts output)
+    counts_matrix <- feature_counts$counts
+    cat("Using counts from feature_counts$counts\n")
+  } else if (is.matrix(feature_counts)) {
+    # If it's already a matrix
+    counts_matrix <- feature_counts
+    cat("Using counts directly from feature_counts (matrix)\n")
+  } else if (is.list(feature_counts) && !is.null(feature_counts$corrected_counts)) {
+    # If it's a list with a 'corrected_counts' field (batch-corrected counts)
+    counts_matrix <- feature_counts$corrected_counts
+    cat("Using counts from feature_counts$corrected_counts\n")
+  } else {
+    # Try to extract counts from the object
+    cat("Attempting to extract counts from feature_counts object...\n")
+    cat("Structure of feature_counts:\n")
+    str(feature_counts)
+    
+    # Try to find a matrix in the object
+    if (is.list(feature_counts)) {
+      for (name in names(feature_counts)) {
+        if (is.matrix(feature_counts[[name]])) {
+          counts_matrix <- feature_counts[[name]]
+          cat(sprintf("Using counts from feature_counts$%s\n", name))
+          break
+        }
+      }
+    }
+    
+    if (!exists("counts_matrix") || is.null(counts_matrix)) {
+      cat("Error: Could not extract counts matrix from feature_counts object\n")
+      return(1)
+    }
   }
   
   # Load gene length information
@@ -186,7 +223,7 @@ main <- function(gse_id) {
   
   # Perform normalization
   results <- normalize_counts(
-    batch_corrected$corrected_counts,
+    counts_matrix,
     gene_lengths,
     output_dir
   )
