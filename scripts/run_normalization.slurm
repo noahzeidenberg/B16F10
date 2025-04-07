@@ -6,8 +6,9 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G           # Less memory needed for normalization
 #SBATCH --job-name=normalization
-#SBATCH --output=logs/normalization/normalization_%j.out
-#SBATCH --error=logs/normalization/normalization_%j.err
+#SBATCH --output=logs/normalization/normalization_%A_%a.out
+#SBATCH --error=logs/normalization/normalization_%A_%a.err
+#SBATCH --array=1-100%5     # Will process up to 100 GSEs, 5 at a time. Adjust the number based on your actual GSE count
 
 # Enable debugging
 set -x
@@ -27,6 +28,7 @@ WORK_DIR=$SUBMIT_DIR
 echo "=== Debug Information ==="
 echo "SUBMIT_DIR: $SUBMIT_DIR"
 echo "Current working directory: $(pwd)"
+echo "Array Task ID: $SLURM_ARRAY_TASK_ID"
 echo "=== End Debug Information ==="
 
 # Create output directories
@@ -34,11 +36,15 @@ echo "Creating output directories..."
 mkdir -p $SUBMIT_DIR/results/normalization
 mkdir -p $SUBMIT_DIR/logs/normalization
 
-# Run the R script
-echo "=== Starting R script execution ==="
+# Get the GSE ID for this array task
+GSE_ID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" rna_seq_gse_ids.txt)
+echo "Processing GSE: $GSE_ID"
+
+# Run the R script for this specific GSE
+echo "=== Starting R script execution for $GSE_ID ==="
 cd $SUBMIT_DIR
-Rscript scripts/normalize_counts.R
+Rscript scripts/normalize_counts.R --gse $GSE_ID
 R_EXIT_CODE=$?
 echo "R script exit code: $R_EXIT_CODE"
 
-echo "Normalization complete for all datasets" 
+echo "Normalization complete for GSE: $GSE_ID" 

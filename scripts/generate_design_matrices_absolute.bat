@@ -5,11 +5,11 @@ echo Starting design matrix generation...
 
 :: Set absolute paths - EDIT THESE PATHS
 set LM_STUDIO_PATH="C:\Users\nbfz0\.lmstudio\bin\lms.exe"
-set MODEL_PATH="Qwen2.5-7B-Instruct-1M-GGUF/Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf"
+set MODEL_PATH="gemma-2-9b-it-GGUF/gemma-2-9b-it-Q4_K_M.gguf"
 set SAMPLE_DIR=%CD%\sample_design
 set OUTPUT_DIR=%CD%\sample_design\design_matrices
 set API_URL=http://127.0.0.1:1234/v1/chat/completions
-set MODEL_ID=qwen2.5-7b-instruct-1m
+set MODEL_ID=gemma-2-9b-it
 
 :: Create output directory
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
@@ -44,11 +44,19 @@ for %%f in ("%SAMPLE_DIR%\*_sample_info.txt") do (
     
     :: Create prompt file
     echo Analyze these samples and assign them to groups based on their experimental conditions. > "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-    echo The group names should work for ComBat and edgeR design matrices. > "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo IMPORTANT: Use ONLY standardized group names as follows: >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo - For replicates such as 'HCD_1' and 'HCD_2', use either control1 and control1 or treatment1 and treatment1. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo - For control samples that are not repliacates ^( i.e. more than one type of control^): control1, control2, etc. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo - For treatment samples that are not repliacates ^( i.e. more than one type of treatment^): treatment1, treatment2, etc. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo - For other conditions that are not replicates: unknown1, unknown2, etc. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo For example, if there are 2 control samples and 3 treatment samples, they should be labeled as: >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo control1, control1, treatment1, treatment1, treatment2, treatment2, treatment3, treatment3 >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo If you are unsure, label them as unknown1, unknown2, etc. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo These standardized names are REQUIRED for batch correction with ComBat-seq. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     echo Please provide a tab-separated list with two columns: Sample_geo_accession and Group. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     echo Sample information: >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     
-    :: Extract both GSM IDs and sample titles
+    :: Extract both GSM IDs and sample titles - Fixed delimiter
     for /f "tokens=1,2 delims=	" %%a in ('type "%%f" ^| findstr /v "Sample_geo_accession"') do (
         echo GSM ID: %%a, Sample Title: %%b >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     )
@@ -64,9 +72,8 @@ for %%f in ("%SAMPLE_DIR%\*_sample_info.txt") do (
     echo. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     
     echo The output must include the column headers 'Sample_geo_accession' and 'Group'. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-    echo Use consistent group names across similar conditions. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-    echo ONLY REPLY WITH THE TAB-SEPARATED LIST OF SAMPLE_GEO_ACCESSION AND GROUP, WITHOUT ANY OTHER TEXT. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
-
+    echo Use ONLY the standardized group names ^(control1, treatment1, etc.^) as described above. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
+    echo ONLY REPLY WITH THE TAB-SEPARATED LIST OF SAMPLE_GEO_ACCESSION AND GROUP IN ENGLISH ONLY, WITHOUT ANY OTHER TEXT OR LANGUAGES. >> "%OUTPUT_DIR%\!gse_id!_prompt.txt"
     
     :: Create a temporary file for the prompt content
     set "prompt_content="
@@ -83,8 +90,8 @@ for %%f in ("%SAMPLE_DIR%\*_sample_info.txt") do (
     echo       "content": "!prompt_content!" >> "%OUTPUT_DIR%\!gse_id!_payload.json"
     echo     } >> "%OUTPUT_DIR%\!gse_id!_payload.json"
     echo   ], >> "%OUTPUT_DIR%\!gse_id!_payload.json"
-    echo   "temperature": 0.1, >> "%OUTPUT_DIR%\!gse_id!_payload.json"
-    echo   "max_tokens": 2000 >> "%OUTPUT_DIR%\!gse_id!_payload.json"
+    echo   "temperature": 0.3, >> "%OUTPUT_DIR%\!gse_id!_payload.json"
+    echo   "max_tokens": 3000 >> "%OUTPUT_DIR%\!gse_id!_payload.json"
     echo } >> "%OUTPUT_DIR%\!gse_id!_payload.json"
     
     :: Run curl to communicate with the LM Studio API
@@ -96,7 +103,7 @@ for %%f in ("%SAMPLE_DIR%\*_sample_info.txt") do (
     
     :: Extract the content from the JSON response using PowerShell
     echo Extracting content from response...
-    powershell -Command "$response = Get-Content '%OUTPUT_DIR%\!gse_id!_response.json' -Raw | ConvertFrom-Json; $response.choices[0].message.content | Out-File -Encoding utf8 '%OUTPUT_DIR%\!gse_id!_group_assignments.txt'"
+    powershell -Command "$response = Get-Content '%OUTPUT_DIR%\!gse_id!_response.json' -Raw | ConvertFrom-Json; $content = $response.choices[0].message.content; $asciiContent = [regex]::Replace($content, '[^\x00-\x7F]+', ''); $asciiContent | Out-File -Encoding utf8 '%OUTPUT_DIR%\!gse_id!_group_assignments.txt'"
     
     :: Copy to design matrix file
     if exist "%OUTPUT_DIR%\!gse_id!_group_assignments.txt" (
