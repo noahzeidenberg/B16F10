@@ -331,6 +331,47 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
         }
       }
       
+      # Check for confounded groups (groups that only appear in one batch)
+      cat("Checking for confounded groups (groups that only appear in one batch)...\n")
+      
+      # Create a contingency table of groups vs batches
+      group_batch_table <- table(batch_info$group, batch_info$batch)
+      
+      # Find groups that only appear in one batch
+      confounded_groups <- c()
+      for (group in rownames(group_batch_table)) {
+        # Count how many batches this group appears in
+        num_batches_with_group <- sum(group_batch_table[group, ] > 0)
+        if (num_batches_with_group == 1) {
+          confounded_groups <- c(confounded_groups, group)
+        }
+      }
+      
+      if (length(confounded_groups) > 0) {
+        cat(sprintf("Found %d confounded groups (groups that only appear in one batch):\n", length(confounded_groups)))
+        cat(paste(confounded_groups, collapse=", "), "\n")
+        cat("Removing these groups before batch correction.\n")
+        
+        # Remove samples with confounded groups
+        confounded_samples <- batch_info$group %in% confounded_groups
+        counts <- counts[, !confounded_samples]
+        batch_info <- batch_info[!confounded_samples, ]
+        
+        # Recalculate batch information
+        batch_info$batch <- factor(batch_info$batch)
+        
+        # Check if we still have enough samples per batch
+        samples_per_batch <- table(batch_info$batch)
+        min_samples_per_batch <- min(samples_per_batch)
+        cat(sprintf("After removing confounded groups, minimum samples per batch: %d\n", min_samples_per_batch))
+        
+        if (min_samples_per_batch < 2) {
+          cat("Error: After removing confounded groups, some batches have fewer than 2 samples.\n")
+          cat("Cannot proceed with batch correction.\n")
+          return(NULL)
+        }
+      }
+      
       # Create a group factor
       group_factor <- factor(batch_info$group)
       
