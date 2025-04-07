@@ -187,7 +187,7 @@ run_feature_counts <- function(bam_dir, gtf_file, output_file) {
   # This is a simple heuristic - we'll assume all files are the same type
   is_paired_end <- FALSE
   if (length(valid_bam_files) > 0) {
-    # Use samtools to check if the BAM file has paired-end reads
+\    # Use samtools to check if the BAM file has paired-end reads
     # If the file has paired-end reads, it will have a "PE" flag in the header
     cmd <- sprintf("samtools view -H %s | grep -q 'PE'", valid_bam_files[1])
     is_paired_end <- system(cmd, intern = FALSE) == 0

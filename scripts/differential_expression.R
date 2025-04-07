@@ -30,7 +30,7 @@ perform_de_analysis <- function(gse_id) {
   
   # Set up directories
   base_dir <- getwd()
-  normalization_dir <- file.path(base_dir, "results", "normalization")
+  batch_correction_dir <- file.path(base_dir, "results", "batch_correction")
   design_dir <- file.path(base_dir, "results", "design_matrices")
   output_dir <- file.path(base_dir, "results", "differential_expression")
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
@@ -42,15 +42,29 @@ perform_de_analysis <- function(gse_id) {
     return(TRUE)
   }
   
-  # Load normalized counts
-  norm_file <- file.path(normalization_dir, "normalized_counts.rds")
-  if (!file.exists(norm_file)) {
-    cat(sprintf("Normalized counts not found for %s. Cannot proceed.\n", gse_id))
+  # Load batch-corrected counts
+  batch_corrected_file <- file.path(batch_correction_dir, "batch_corrected_counts.rds")
+  if (!file.exists(batch_corrected_file)) {
+    cat(sprintf("Batch-corrected counts not found. Cannot proceed.\n"))
     return(FALSE)
   }
   
-  cat("Loading normalized counts...\n")
-  norm_data <- readRDS(norm_file)
+  cat("Loading batch-corrected counts...\n")
+  batch_corrected_data <- readRDS(batch_corrected_file)
+  
+  # Extract counts and batch info
+  counts <- batch_corrected_data$corrected_counts
+  batch_info <- batch_corrected_data$batch_info
+  
+  # Filter counts for the specific GSE ID
+  gse_samples <- batch_info$sample[grep(paste0("^", gse_id, "_"), batch_info$sample)]
+  if (length(gse_samples) == 0) {
+    cat(sprintf("No samples found for %s in batch-corrected data. Cannot proceed.\n", gse_id))
+    return(FALSE)
+  }
+  
+  # Extract counts for this GSE
+  gse_counts <- counts[, gse_samples, drop = FALSE]
   
   # Load design matrix
   design_file <- file.path(design_dir, paste0(gse_id, "_design_matrix.txt"))
@@ -63,19 +77,14 @@ perform_de_analysis <- function(gse_id) {
   design_matrix <- read.table(design_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
   
   # Check if we have the necessary data
-  if (is.null(norm_data$normalized_counts) || nrow(norm_data$normalized_counts) == 0) {
-    cat("No normalized counts found. Cannot proceed.\n")
+  if (is.null(gse_counts) || nrow(gse_counts) == 0) {
+    cat("No counts found. Cannot proceed.\n")
     return(FALSE)
   }
   
   # Create DGEList object
   cat("Creating DGEList object...\n")
-  y <- DGEList(counts = norm_data$normalized_counts)
-  
-  # Add gene lengths if available
-  if (!is.null(norm_data$gene_lengths)) {
-    y$genes$Length <- norm_data$gene_lengths$length
-  }
+  y <- DGEList(counts = gse_counts)
   
   # Filter low count genes
   cat("Filtering low count genes...\n")

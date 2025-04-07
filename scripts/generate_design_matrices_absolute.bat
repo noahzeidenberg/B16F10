@@ -5,11 +5,11 @@ echo Starting design matrix generation...
 
 :: Set absolute paths - EDIT THESE PATHS
 set LM_STUDIO_PATH="C:\Users\nbfz0\.lmstudio\bin\lms.exe"
-set MODEL_PATH="Qwen2.5-Coder-3B-Instruct-GGUF/qwen2.5-coder-3b-instruct-q4_k_m.gguf"
+set MODEL_PATH="Qwen2.5-7B-Instruct-1M-GGUF/Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf"
 set SAMPLE_DIR=%CD%\sample_design
 set OUTPUT_DIR=%CD%\sample_design\design_matrices
 set API_URL=http://127.0.0.1:1234/v1/chat/completions
-set MODEL_ID=qwen2.5-coder-3b-instruct
+set MODEL_ID=qwen2.5-7b-instruct-1m
 
 :: Create output directory
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
