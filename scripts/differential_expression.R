@@ -30,10 +30,32 @@ perform_de_analysis <- function(gse_id) {
   
   # Set up directories
   base_dir <- getwd()
+  cat(sprintf("Base directory: %s\n", base_dir))
+  
   gse_dir <- file.path(base_dir, gse_id)
+  cat(sprintf("GSE directory: %s\n", gse_dir))
+  
+  # Check if GSE directory exists
+  if (!dir.exists(gse_dir)) {
+    cat(sprintf("GSE directory %s does not exist. Cannot proceed.\n", gse_dir))
+    return(FALSE)
+  }
+  
   normalization_dir <- file.path(gse_dir, "results", "normalization")
+  cat(sprintf("Normalization directory: %s\n", normalization_dir))
+  
+  # Check if normalization directory exists
+  if (!dir.exists(normalization_dir)) {
+    cat(sprintf("Normalization directory %s does not exist. Cannot proceed.\n", normalization_dir))
+    return(FALSE)
+  }
+  
   design_dir <- file.path(base_dir, "results", "design_matrices")
+  cat(sprintf("Design directory: %s\n", design_dir))
+  
   output_dir <- file.path(gse_dir, "results", "differential_expression")
+  cat(sprintf("Output directory: %s\n", output_dir))
+  
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
   
   # Check if analysis has already been performed
@@ -43,8 +65,14 @@ perform_de_analysis <- function(gse_id) {
     return(TRUE)
   }
   
+  # List files in normalization directory for debugging
+  cat("Files in normalization directory:\n")
+  list.files(normalization_dir, full.names = TRUE)
+  
   # Load normalized counts
   normalized_file <- file.path(normalization_dir, "normalized_counts.rds")
+  cat(sprintf("Looking for normalized counts at: %s\n", normalized_file))
+  
   if (!file.exists(normalized_file)) {
     cat(sprintf("Normalized counts not found at %s. Cannot proceed.\n", normalized_file))
     return(FALSE)
@@ -53,14 +81,29 @@ perform_de_analysis <- function(gse_id) {
   cat("Loading normalized counts...\n")
   normalized_data <- readRDS(normalized_file)
   
+  # Print structure of normalized data for debugging
+  cat("Structure of normalized data:\n")
+  str(normalized_data)
+  
   # Extract counts
+  if (!"normalized_counts" %in% names(normalized_data)) {
+    cat("Error: 'normalized_counts' not found in normalized data. Available keys:\n")
+    cat(paste(names(normalized_data), collapse = ", "), "\n")
+    return(FALSE)
+  }
+  
   counts <- normalized_data$normalized_counts
   
   # Get sample names from the counts matrix
   samples <- colnames(counts)
+  cat(sprintf("Found %d samples in normalized counts\n", length(samples)))
+  cat("Sample names:\n")
+  cat(paste(samples, collapse = ", "), "\n")
   
   # Filter counts for the specific GSE ID
   gse_samples <- samples[grep(paste0("^", gse_id, "_"), samples)]
+  cat(sprintf("Found %d samples for GSE ID %s\n", length(gse_samples), gse_id))
+  
   if (length(gse_samples) == 0) {
     cat(sprintf("No samples found for %s in normalized data. Cannot proceed.\n", gse_id))
     return(FALSE)
@@ -71,6 +114,8 @@ perform_de_analysis <- function(gse_id) {
   
   # Load design matrix
   design_file <- file.path(design_dir, paste0(gse_id, "_design_matrix.txt"))
+  cat(sprintf("Looking for design matrix at: %s\n", design_file))
+  
   if (!file.exists(design_file)) {
     cat(sprintf("Design matrix not found for %s. Cannot proceed.\n", gse_id))
     return(FALSE)

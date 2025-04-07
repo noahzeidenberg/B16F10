@@ -20,7 +20,25 @@ source ~/scratch/B16F10/.venv/bin/activate
 # Get GSE ID from command line or use default
 GSE_ID=${1:-GSE254073}
 
+echo "Starting differential expression analysis for $GSE_ID"
+echo "Current working directory: $(pwd)"
+echo "Checking if GSE directory exists: $GSE_ID"
+if [ -d "$GSE_ID" ]; then
+  echo "GSE directory exists"
+  echo "Checking if normalization directory exists: $GSE_ID/results/normalization"
+  if [ -d "$GSE_ID/results/normalization" ]; then
+    echo "Normalization directory exists"
+    echo "Files in normalization directory:"
+    ls -la $GSE_ID/results/normalization/
+  else
+    echo "Normalization directory does not exist"
+  fi
+else
+  echo "GSE directory does not exist"
+fi
+
 # Run the R script
+echo "Running differential_expression.R for $GSE_ID"
 Rscript scripts/differential_expression.R $GSE_ID
 
 # Check if the script ran successfully
