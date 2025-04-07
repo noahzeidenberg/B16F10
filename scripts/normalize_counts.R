@@ -114,9 +114,9 @@ normalize_counts <- function(counts, gene_lengths, output_dir) {
 }
 
 # Main workflow
-main <- function() {
+main <- function(gse_id) {
   # Set up directories
-  base_dir <- getwd()
+  base_dir <- file.path(getwd(), gse_id)
   batch_correction_dir <- file.path(base_dir, "results", "batch_correction")
   output_dir <- file.path(base_dir, "results", "normalization")
   
@@ -168,5 +168,16 @@ main <- function() {
 
 # Run the main function if this script is being run directly
 if (sys.nframe() == 0) {
-  main()
+  # Check if GSE ID is provided as a command-line argument
+  args <- commandArgs(trailingOnly = TRUE)
+  if (length(args) < 1) {
+    cat("Error: GSE ID not provided\n")
+    cat("Usage: Rscript normalize_counts.R <GSE_ID>\n")
+    cat("Example: Rscript normalize_counts.R GSE287957\n")
+    quit(status = 1)
+  }
+  
+  gse_id <- args[1]
+  cat(sprintf("Processing GSE ID: %s\n", gse_id))
+  main(gse_id)
 } 

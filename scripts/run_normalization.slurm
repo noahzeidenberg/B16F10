@@ -12,6 +12,15 @@
 # Enable debugging
 set -x
 
+# Check if GSE ID is provided
+if [ $# -ne 1 ]; then
+    echo "Usage: sbatch $0 <GSE_ID>"
+    echo "Example: sbatch $0 GSE287957"
+    exit 1
+fi
+
+GSE_ID=$1
+
 # Load required modules
 module load r
 module load gcc
@@ -27,6 +36,7 @@ WORK_DIR=$SUBMIT_DIR
 echo "=== Debug Information ==="
 echo "SUBMIT_DIR: $SUBMIT_DIR"
 echo "Current working directory: $(pwd)"
+echo "GSE ID: $GSE_ID"
 echo "=== End Debug Information ==="
 
 # Create output directories
@@ -37,8 +47,8 @@ mkdir -p $SUBMIT_DIR/logs/normalization
 # Run the R script
 echo "=== Starting R script execution ==="
 cd $SUBMIT_DIR
-Rscript scripts/normalize_counts.R
+Rscript scripts/normalize_counts.R $GSE_ID
 R_EXIT_CODE=$?
 echo "R script exit code: $R_EXIT_CODE"
 
-echo "Normalization complete" 
+echo "Normalization complete for $GSE_ID" 
