@@ -295,7 +295,23 @@ perform_de_analysis <- function(gse_id) {
   
   # Create DGEList object
   cat("Creating DGEList object...\n")
-  y <- DGEList(counts = counts)
+  
+  # Check for negative values in counts
+  if (any(counts < 0)) {
+    cat("Warning: Negative values detected in counts. This is expected for log-transformed data.\n")
+    cat("Converting to raw counts before creating DGEList...\n")
+    
+    # Convert log-transformed counts back to raw counts
+    # For log-transformed data, we need to reverse the transformation
+    # If the data was log-transformed with log=TRUE in cpm(), we need to use exp()
+    raw_counts <- exp(counts)
+    
+    # Create DGEList with raw counts
+    y <- DGEList(counts = raw_counts)
+  } else {
+    # Create DGEList with original counts
+    y <- DGEList(counts = counts)
+  }
   
   # Filter low count genes
   cat("Filtering low count genes...\n")
@@ -431,6 +447,7 @@ perform_de_analysis <- function(gse_id) {
       de_expr <- y$counts[all_de_genes, ]
       
       # Scale for better visualization
+      # Note: Since we're working with log-transformed values, we can use scale() directly
       de_expr_scaled <- t(scale(t(de_expr)))
       
       # Create heatmap
