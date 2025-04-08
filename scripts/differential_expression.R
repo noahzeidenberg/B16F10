@@ -319,7 +319,7 @@ perform_de_analysis <- function(gse_id) {
     cat("Converting log2(CPM) values back to CPM...\n")
     
     # Convert from log2(CPM) to CPM
-    raw_counts <- 2^counts
+    raw_counts <- 2^counts-2 # prior.count = 2 by default in edgeR
     
     # Print summary of converted counts
     cat("Converted counts summary:\n")
