@@ -30,14 +30,37 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# Run the preprocessing script
+echo "Preprocessing normalized counts..."
+Rscript "$BASE_DIR/scripts/preprocess_counts.R" > "$BASE_DIR/logs/fix_de_analysis/preprocess_counts.log" 2>&1
+
+# Check if the script ran successfully
+if [ $? -ne 0 ]; then
+  echo "Error preprocessing normalized counts. Check the log file for details."
+  exit 1
+fi
+
 # Run the differential expression analysis
 echo "Running differential expression analysis..."
 Rscript "$BASE_DIR/scripts/differential_expression.R" "$GSE_ID" > "$BASE_DIR/logs/fix_de_analysis/differential_expression.log" 2>&1
 
 # Check if the script ran successfully
 if [ $? -ne 0 ]; then
-  echo "Error running differential expression analysis. Check the log file for details."
-  exit 1
+  echo "Error running differential expression analysis. Trying modified approach..."
+  
+  # Run the modified differential expression analysis
+  echo "Running modified differential expression analysis..."
+  Rscript "$BASE_DIR/scripts/differential_expression_modified.R" "$GSE_ID" > "$BASE_DIR/logs/fix_de_analysis/differential_expression_modified.log" 2>&1
+  
+  # Check if the script ran successfully
+  if [ $? -ne 0 ]; then
+    echo "Error running modified differential expression analysis. Check the log file for details."
+    exit 1
+  fi
+  
+  echo "Modified differential expression analysis completed successfully."
+else
+  echo "Differential expression analysis completed successfully."
 fi
 
 echo "All steps completed successfully." 
