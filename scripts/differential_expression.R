@@ -812,11 +812,12 @@ perform_de_analysis <- function(gse_id) {
       
       # Create interactive MA plot with plotly
       tryCatch({
+        # Use res$table instead of qlf$table since it contains the FDR column
         ma_data <- data.frame(
-          logCPM = qlf$table$logCPM,
-          logFC = qlf$table$logFC,
-          FDR = qlf$table$FDR,
-          genes = rownames(qlf$table)
+          logCPM = res$table$logCPM,
+          logFC = res$table$logFC,
+          FDR = res$table$FDR,
+          genes = rownames(res$table)
         )
         
         # Add significance information
@@ -905,6 +906,9 @@ perform_de_analysis <- function(gse_id) {
           volcano_data$FDR < 0.05 & volcano_data$logFC < -1 ~ "Downregulated",
           TRUE ~ "Not Significant"
         )
+        
+        # Define colors for the points (same as MA plot)
+        color_map <- c("Upregulated" = "#c46666", "Downregulated" = "#1a80bb", "Not Significant" = "#b0b0b0")
         
         # Create interactive volcano plot
         volcano_plot <- plot_ly(
