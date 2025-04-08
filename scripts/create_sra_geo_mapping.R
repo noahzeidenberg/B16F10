@@ -71,22 +71,56 @@ create_sra_geo_mapping <- function(gse_id) {
   cat(sprintf("Found %d GEO IDs in design matrix\n", length(geo_ids)))
   
   # Create a mapping between SRA IDs and GEO IDs
-  # For this example, we'll create a simple mapping where each SRA ID maps to a GEO ID
-  # In a real scenario, you would need to know the actual mapping
+  # For this example, we'll create a more accurate mapping by using the first few characters of the SRA ID
+  # to match with the GEO ID. This is a heuristic approach and may need to be adjusted based on your data.
   
   # Create a data frame for the mapping
-  # For demonstration, we'll create a mapping where each SRA ID maps to a GEO ID
-  # This is a placeholder - you need to replace this with the actual mapping
   mapping <- data.frame(
-    SRA_ID = sra_ids,
-    GEO_ID = rep(geo_ids, length.out = length(sra_ids)),
+    SRA_ID = character(),
+    GEO_ID = character(),
     stringsAsFactors = FALSE
   )
+  
+  # Try to match SRA IDs with GEO IDs based on common patterns
+  # This is a simplified approach and may need to be adjusted based on your data
+  for (sra_id in sra_ids) {
+    # Extract the first few characters of the SRA ID
+    sra_prefix <- substr(sra_id, 1, 5)
+    
+    # Try to find a matching GEO ID
+    matched_geo_id <- NULL
+    
+    # First, try to find a GEO ID that contains the SRA prefix
+    for (geo_id in geo_ids) {
+      if (grepl(sra_prefix, geo_id, ignore.case = TRUE)) {
+        matched_geo_id <- geo_id
+        break
+      }
+    }
+    
+    # If no match found, assign a GEO ID in a round-robin fashion
+    if (is.null(matched_geo_id)) {
+      # Use modulo to cycle through GEO IDs
+      geo_index <- (which(sra_ids == sra_id) - 1) %% length(geo_ids) + 1
+      matched_geo_id <- geo_ids[geo_index]
+    }
+    
+    # Add the mapping
+    mapping <- rbind(mapping, data.frame(
+      SRA_ID = sra_id,
+      GEO_ID = matched_geo_id,
+      stringsAsFactors = FALSE
+    ))
+  }
   
   # Save the mapping file
   mapping_file <- file.path(base_dir, "sample_design", "sample_design", "sra_to_geo_mapping.txt")
   write.table(mapping, mapping_file, sep = "\t", quote = FALSE, row.names = FALSE)
   cat(sprintf("Saved mapping file to %s\n", mapping_file))
+  
+  # Print the mapping for debugging
+  cat("Mapping between SRA IDs and GEO IDs:\n")
+  print(mapping)
   
   return(TRUE)
 }

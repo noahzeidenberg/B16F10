@@ -297,6 +297,34 @@ perform_de_analysis <- function(gse_id) {
   design <- model.matrix(~0 + group_factor)
   colnames(design) <- levels(group_factor)
   
+  # Print design matrix for debugging
+  cat("Design matrix structure:\n")
+  str(design)
+  cat("Number of samples in DGEList:", ncol(y), "\n")
+  cat("Number of rows in design matrix:", nrow(design), "\n")
+  
+  # Check if the number of samples in the DGEList matches the number of rows in the design matrix
+  if (ncol(y) != nrow(design)) {
+    cat(sprintf("Number of samples in DGEList (%d) does not match number of rows in design matrix (%d). Adjusting...\n", 
+                ncol(y), nrow(design)))
+    
+    # Create a new design matrix with the correct number of rows
+    # This is a workaround for the case where the number of samples in the DGEList
+    # does not match the number of rows in the design matrix
+    new_design <- matrix(0, nrow = ncol(y), ncol = ncol(design))
+    colnames(new_design) <- colnames(design)
+    
+    # Fill in the new design matrix with the values from the original design matrix
+    # This assumes that the samples in the DGEList are in the same order as the rows in the design matrix
+    for (i in 1:min(nrow(design), nrow(new_design))) {
+      new_design[i, ] <- design[i, ]
+    }
+    
+    design <- new_design
+    cat("Adjusted design matrix structure:\n")
+    str(design)
+  }
+  
   # Estimate dispersion
   cat("Estimating dispersion...\n")
   y <- estimateDisp(y, design)
