@@ -286,8 +286,20 @@ perform_de_analysis <- function(gse_id) {
     cat(sprintf("Filtering counts to %d samples with valid groups.\n", length(valid_samples)))
     counts <- counts[, valid_samples]
     
-    # Create a factor for the groups
-    group_factor <- factor(sample_to_group$Group)
+    # Create a factor for the groups with explicit levels
+    # First, get all unique groups from the design matrix
+    all_groups <- unique(design_matrix$Group)
+    cat("All groups from design matrix:\n")
+    print(all_groups)
+    
+    # Create a factor with explicit levels
+    group_factor <- factor(sample_to_group$Group, levels = all_groups)
+    
+    # Print the group factor for debugging
+    cat("Group factor:\n")
+    print(group_factor)
+    cat("Group factor levels:\n")
+    print(levels(group_factor))
   } else {
     cat("No valid samples found with matching GSM IDs in design matrix. Cannot proceed.\n")
     return(FALSE)
@@ -322,6 +334,10 @@ perform_de_analysis <- function(gse_id) {
   # Create design matrix for edgeR
   cat("Creating design matrix for edgeR...\n")
   
+  # Print group factor levels for debugging
+  cat("Group factor levels:\n")
+  print(levels(group_factor))
+  
   # Create design matrix
   design <- model.matrix(~0 + group_factor)
   colnames(design) <- levels(group_factor)
@@ -332,26 +348,12 @@ perform_de_analysis <- function(gse_id) {
   cat("Number of samples in DGEList:", ncol(y), "\n")
   cat("Number of rows in design matrix:", nrow(design), "\n")
   
-  # Check if the number of samples in the DGEList matches the number of rows in the design matrix
-  if (ncol(y) != nrow(design)) {
-    cat(sprintf("Number of samples in DGEList (%d) does not match number of rows in design matrix (%d). Adjusting...\n", 
-                ncol(y), nrow(design)))
-    
-    # Create a new design matrix with the correct number of rows
-    # This is a workaround for the case where the number of samples in the DGEList
-    # does not match the number of rows in the design matrix
-    new_design <- matrix(0, nrow = ncol(y), ncol = ncol(design))
-    colnames(new_design) <- colnames(design)
-    
-    # Fill in the new design matrix with the values from the original design matrix
-    # This assumes that the samples in the DGEList are in the same order as the rows in the design matrix
-    for (i in 1:min(nrow(design), nrow(new_design))) {
-      new_design[i, ] <- design[i, ]
-    }
-    
-    design <- new_design
-    cat("Adjusted design matrix structure:\n")
-    str(design)
+  # Ensure the design matrix has the correct structure
+  if (ncol(design) != length(levels(group_factor))) {
+    cat("Warning: Design matrix columns do not match group factor levels. Adjusting...\n")
+    # Recreate the design matrix with explicit levels
+    design <- model.matrix(~0 + factor(group_factor, levels = levels(group_factor)))
+    colnames(design) <- levels(group_factor)
   }
   
   # Estimate dispersion
@@ -377,15 +379,23 @@ perform_de_analysis <- function(gse_id) {
   cat(sprintf("Groups found: %s\n", paste(groups, collapse = ", ")))
   
   if (length(groups) > 1) {
-    for (i in 1:(length(groups) - 1)) {
-      for (j in (i + 1):length(groups)) {
-        contrast_name <- paste0(groups[j], "_vs_", groups[i])
-        contrasts[[contrast_name]] <- makeContrasts(
-          paste0(groups[j], " - ", groups[i]),
-          levels = design
-        )
-      }
+    # Create contrasts for each group compared to the first group (control)
+    control_group <- groups[1]  # Assuming the first group is the control
+    for (j in 2:length(groups)) {
+      contrast_name <- paste0(groups[j], "_vs_", control_group)
+      cat(sprintf("Creating contrast: %s\n", contrast_name))
+      
+      # Create the contrast using makeContrasts
+      contrast_formula <- paste0(groups[j], " - ", control_group)
+      cat(sprintf("Contrast formula: %s\n", contrast_formula))
+      
+      contrasts[[contrast_name]] <- makeContrasts(
+        contrast_formula,
+        levels = design
+      )
     }
+  } else {
+    cat("Only one group found in the design matrix. Cannot create contrasts.\n")
   }
   
   # Perform differential expression analysis for each contrast
