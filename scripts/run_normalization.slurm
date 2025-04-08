@@ -43,7 +43,7 @@ echo "Processing GSE: $GSE_ID"
 # Run the R script for this specific GSE
 echo "=== Starting R script execution for $GSE_ID ==="
 cd $SUBMIT_DIR
-Rscript scripts/normalize_counts.R --gse $GSE_ID
+Rscript scripts/normalize_counts.R $GSE_ID
 R_EXIT_CODE=$?
 echo "R script exit code: $R_EXIT_CODE"
 

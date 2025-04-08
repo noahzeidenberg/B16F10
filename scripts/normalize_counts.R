@@ -277,6 +277,13 @@ if (sys.nframe() == 0) {
   # Extract GSE ID from arguments
   gse_id <- args[1]
   
+  # Validate GSE ID format (should start with "GSE")
+  if (!grepl("^GSE[0-9]+$", gse_id)) {
+    cat(sprintf("Error: Invalid GSE ID format: %s\n", gse_id))
+    cat("GSE ID should start with 'GSE' followed by numbers\n")
+    quit(status = 1)
+  }
+  
   # Run main function with GSE ID
   quit(status = main(gse_id))
 } 
