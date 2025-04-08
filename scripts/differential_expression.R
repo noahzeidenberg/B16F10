@@ -290,16 +290,13 @@ perform_de_analysis <- function(gse_id) {
     cat("Original group assignments:\n")
     print(sample_to_group$Group)
     
-    # Simplify group names by removing numbers
-    simplified_groups <- gsub("[0-9]", "", sample_to_group$Group)
-    
-    # Create a factor for the simplified groups
-    group_factor <- factor(simplified_groups)
+    # Use the original group names without simplification
+    group_factor <- factor(sample_to_group$Group)
     
     # Print the group factor for debugging
-    cat("Simplified group factor:\n")
+    cat("Group factor:\n")
     print(group_factor)
-    cat("Simplified group factor levels:\n")
+    cat("Group factor levels:\n")
     print(levels(group_factor))
     
     # Print a table of the group assignments
