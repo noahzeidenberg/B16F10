@@ -483,6 +483,16 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       cat("Identified control groups:\n")
       print(control_groups)
       
+      # Standardize control group names
+      cat("Standardizing control group names...\n")
+      # Group "control", "control ", and "control1" together as just "control"
+      for (i in 1:nrow(batch_info)) {
+        if (batch_info$group[i] %in% c("control", "control ", "control1")) {
+          batch_info$group[i] <- "control"
+          cat(sprintf("Standardized group name: %s -> control\n", batch_info$group[i]))
+        }
+      }
+      
       # Convert to factor
       treatment_factor <- factor(treatment_factor, levels = c("control", "treatment"))
       
