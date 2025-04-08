@@ -464,47 +464,39 @@ perform_de_analysis <- function(gse_id) {
   groups <- colnames(design)
   cat(sprintf("Groups found: %s\n", paste(groups, collapse = ", ")))
   
-  if (length(groups) > 1) {
-    # Check if we have control and treatment groups
-    if ("control" %in% groups && "treatment" %in% groups) {
-      # Create contrast for control vs treatment
-      contrast_name <- "treatment_vs_control"
+  # Find the control group (assuming it contains "control" in the name)
+  control_groups <- groups[grep("control", groups, ignore.case = TRUE)]
+  treatment_groups <- groups[grep("treatment", groups, ignore.case = TRUE)]
+  
+  if (length(control_groups) > 0 && length(treatment_groups) > 0) {
+    # Use the first control group as the reference
+    control_group <- control_groups[1]
+    cat(sprintf("Using %s as the control group\n", control_group))
+    
+    # Create contrasts for each treatment group compared to the control group
+    for (treatment_group in treatment_groups) {
+      contrast_name <- paste0(treatment_group, "_vs_", control_group)
       cat(sprintf("Creating contrast: %s\n", contrast_name))
       
       # Create the contrast using makeContrasts
       contrasts[[contrast_name]] <- makeContrasts(
-        treatment - control,
+        paste0(treatment_group, " - ", control_group),
         levels = design
       )
-      
-      # Check if we have unknown groups
-      if ("unknown" %in% groups) {
-        # Create contrast for control vs treatment+unknown
-        contrast_name <- "treatment_unknown_vs_control"
-        cat(sprintf("Creating contrast: %s\n", contrast_name))
-        
-        # Create the contrast using makeContrasts
-        contrasts[[contrast_name]] <- makeContrasts(
-          (treatment + unknown) - control,
-          levels = design
-        )
-      }
-    } else {
-      # If we don't have control and treatment groups, create contrasts for each group compared to the first group
-      control_group <- groups[1]  # Assuming the first group is the control
-      for (j in 2:length(groups)) {
-        contrast_name <- paste0(groups[j], "_vs_", control_group)
-        cat(sprintf("Creating contrast: %s\n", contrast_name))
-        
-        # Create the contrast using makeContrasts
-        contrasts[[contrast_name]] <- makeContrasts(
-          paste0(groups[j], " - ", control_group),
-          levels = design
-        )
-      }
     }
   } else {
-    cat("Only one group found in the design matrix. Cannot create contrasts.\n")
+    # If we don't have control and treatment groups, create contrasts for each group compared to the first group
+    control_group <- groups[1]  # Assuming the first group is the control
+    for (j in 2:length(groups)) {
+      contrast_name <- paste0(groups[j], "_vs_", control_group)
+      cat(sprintf("Creating contrast: %s\n", contrast_name))
+      
+      # Create the contrast using makeContrasts
+      contrasts[[contrast_name]] <- makeContrasts(
+        paste0(groups[j], " - ", control_group),
+        levels = design
+      )
+    }
   }
   
   # Perform differential expression analysis for each contrast
