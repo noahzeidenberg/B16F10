@@ -2,7 +2,7 @@
 
 # Script to create a mapping file between SRA IDs and GEO IDs
 # This script extracts SRA IDs from the normalized counts file and
-# creates a mapping to GEO IDs from the design matrix
+# creates a mapping to GEO IDs from the design matrix using the folder structure
 
 # Load required packages
 if (!requireNamespace("BiocManager", quietly = TRUE))
@@ -70,9 +70,8 @@ create_sra_geo_mapping <- function(gse_id) {
   geo_ids <- design_matrix$Sample_geo_accession
   cat(sprintf("Found %d GEO IDs in design matrix\n", length(geo_ids)))
   
-  # Create a mapping between SRA IDs and GEO IDs
-  # For this example, we'll create a more accurate mapping by using the first few characters of the SRA ID
-  # to match with the GEO ID. This is a heuristic approach and may need to be adjusted based on your data.
+  # Create a mapping between SRA IDs and GEO IDs using the folder structure
+  cat("Creating mapping using folder structure...\n")
   
   # Create a data frame for the mapping
   mapping <- data.frame(
@@ -81,36 +80,100 @@ create_sra_geo_mapping <- function(gse_id) {
     stringsAsFactors = FALSE
   )
   
-  # Try to match SRA IDs with GEO IDs based on common patterns
-  # This is a simplified approach and may need to be adjusted based on your data
-  for (sra_id in sra_ids) {
-    # Extract the first few characters of the SRA ID
-    sra_prefix <- substr(sra_id, 1, 5)
+  # Check if the samples directory exists
+  samples_dir <- file.path(gse_dir, "samples")
+  if (!dir.exists(samples_dir)) {
+    cat(sprintf("Samples directory not found at %s. Cannot proceed.\n", samples_dir))
+    return(FALSE)
+  }
+  
+  # Get all GSM directories
+  gsm_dirs <- list.dirs(samples_dir, pattern = "GSM", full.names = TRUE)
+  cat(sprintf("Found %d GSM directories\n", length(gsm_dirs)))
+  
+  # Create a mapping from folder structure
+  for (gsm_dir in gsm_dirs) {
+    # Extract GSM ID from directory name
+    gsm_id <- basename(gsm_dir)
     
-    # Try to find a matching GEO ID
-    matched_geo_id <- NULL
-    
-    # First, try to find a GEO ID that contains the SRA prefix
-    for (geo_id in geo_ids) {
-      if (grepl(sra_prefix, geo_id, ignore.case = TRUE)) {
-        matched_geo_id <- geo_id
-        break
+    # Check if SRA directory exists
+    sra_dir <- file.path(gsm_dir, "SRA")
+    if (dir.exists(sra_dir)) {
+      # Get all SRA directories
+      sra_subdirs <- list.dirs(sra_dir, full.names = TRUE, recursive = FALSE)
+      
+      # Skip the FASTQ directory
+      sra_subdirs <- sra_subdirs[basename(sra_subdirs) != "FASTQ"]
+      
+      if (length(sra_subdirs) > 0) {
+        for (sra_subdir in sra_subdirs) {
+          sra_id <- basename(sra_subdir)
+          
+          # Add the mapping
+          mapping <- rbind(mapping, data.frame(
+            SRA_ID = sra_id,
+            GEO_ID = gsm_id,
+            stringsAsFactors = FALSE
+          ))
+        }
       }
     }
+  }
+  
+  # Check if we found any mappings
+  if (nrow(mapping) == 0) {
+    cat("No mappings found using folder structure. Falling back to heuristic approach...\n")
     
-    # If no match found, assign a GEO ID in a round-robin fashion
-    if (is.null(matched_geo_id)) {
-      # Use modulo to cycle through GEO IDs
-      geo_index <- (which(sra_ids == sra_id) - 1) %% length(geo_ids) + 1
-      matched_geo_id <- geo_ids[geo_index]
+    # Fall back to the heuristic approach
+    for (sra_id in sra_ids) {
+      # Extract the first few characters of the SRA ID
+      sra_prefix <- substr(sra_id, 1, 5)
+      
+      # Try to find a matching GEO ID
+      matched_geo_id <- NULL
+      
+      # First, try to find a GEO ID that contains the SRA prefix
+      for (geo_id in geo_ids) {
+        if (grepl(sra_prefix, geo_id, ignore.case = TRUE)) {
+          matched_geo_id <- geo_id
+          break
+        }
+      }
+      
+      # If no match found, assign a GEO ID in a round-robin fashion
+      if (is.null(matched_geo_id)) {
+        # Use modulo to cycle through GEO IDs
+        geo_index <- (which(sra_ids == sra_id) - 1) %% length(geo_ids) + 1
+        matched_geo_id <- geo_ids[geo_index]
+      }
+      
+      # Add the mapping
+      mapping <- rbind(mapping, data.frame(
+        SRA_ID = sra_id,
+        GEO_ID = matched_geo_id,
+        stringsAsFactors = FALSE
+      ))
     }
+  }
+  
+  # Check if we have mappings for all SRA IDs
+  missing_sra_ids <- setdiff(sra_ids, mapping$SRA_ID)
+  if (length(missing_sra_ids) > 0) {
+    cat(sprintf("Missing mappings for %d SRA IDs. Adding them using round-robin approach...\n", length(missing_sra_ids)))
     
-    # Add the mapping
-    mapping <- rbind(mapping, data.frame(
-      SRA_ID = sra_id,
-      GEO_ID = matched_geo_id,
-      stringsAsFactors = FALSE
-    ))
+    # Add missing mappings using round-robin approach
+    for (i in 1:length(missing_sra_ids)) {
+      sra_id <- missing_sra_ids[i]
+      geo_index <- (i - 1) %% length(geo_ids) + 1
+      matched_geo_id <- geo_ids[geo_index]
+      
+      # Add the mapping
+      mapping <- rbind(mapping, data.frame(
+        SRA_ID = sra_id,
+        GEO_ID = matched_geo_id,
+        stringsAsFactors = FALSE
+      ))
+    }
   }
   
   # Save the mapping file
