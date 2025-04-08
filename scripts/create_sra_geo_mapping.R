@@ -87,8 +87,8 @@ create_sra_geo_mapping <- function(gse_id) {
     return(FALSE)
   }
   
-  # Get all GSM directories
-  gsm_dirs <- list.dirs(samples_dir, pattern = "GSM", full.names = TRUE)
+  # Get all GSM directories - fixed the list.dirs call
+  gsm_dirs <- list.files(samples_dir, pattern = "^GSM", full.names = TRUE)
   cat(sprintf("Found %d GSM directories\n", length(gsm_dirs)))
   
   # Create a mapping from folder structure
@@ -99,8 +99,8 @@ create_sra_geo_mapping <- function(gse_id) {
     # Check if SRA directory exists
     sra_dir <- file.path(gsm_dir, "SRA")
     if (dir.exists(sra_dir)) {
-      # Get all SRA directories
-      sra_subdirs <- list.dirs(sra_dir, full.names = TRUE, recursive = FALSE)
+      # Get all SRA directories - fixed the list.dirs call
+      sra_subdirs <- list.files(sra_dir, full.names = TRUE)
       
       # Skip the FASTQ directory
       sra_subdirs <- sra_subdirs[basename(sra_subdirs) != "FASTQ"]
