@@ -48,14 +48,14 @@ safe_load_package <- function(pkg, bioc_pkg = FALSE) {
 required_packages <- list(
   "edgeR" = TRUE,        # Bioconductor
   "limma" = TRUE,        # Bioconductor
-  "ggplot2" = FALSE,     # CRAN
+  "ggplot2" = TRUE,     # CRAN
   "pheatmap" = FALSE,    # CRAN
-  "stringr" = FALSE,     # CRAN
-  "data.table" = FALSE,  # CRAN
-  "plotly" = FALSE,      # CRAN
-  "dplyr" = FALSE,       # CRAN
-  "htmlwidgets" = FALSE, # CRAN
-  "curl" = FALSE         # CRAN - for internet connectivity check
+  "stringr" = TRUE,     # CRAN
+  "data.table" = TRUE,  # CRAN
+  "plotly" = TRUE,      # CRAN
+  "dplyr" = TRUE,       # CRAN
+  "htmlwidgets" = TRUE, # CRAN
+  "curl" = TRUE         # CRAN - for internet connectivity check
 )
 
 # Load curl first to check internet connectivity
@@ -232,7 +232,35 @@ perform_de_analysis <- function(gse_id) {
   }
   
   cat("Loading design matrix...\n")
-  design_matrix <- read.table(design_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+  # Try to read the design matrix with different encodings if needed
+  tryCatch({
+    design_matrix <- read.table(design_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+    
+    # Check if the design matrix has the expected structure
+    if (ncol(design_matrix) < 2) {
+      cat("Warning: Design matrix has fewer columns than expected. Trying with different encoding...\n")
+      design_matrix <- read.table(design_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+    }
+    
+    # Check if the column names are correct
+    if (!"Sample_geo_accession" %in% colnames(design_matrix) || !"Group" %in% colnames(design_matrix)) {
+      cat("Warning: Design matrix column names are not as expected. Trying to fix...\n")
+      # Try to identify the correct columns
+      if (any(grepl("geo|accession|gsm", colnames(design_matrix), ignore.case = TRUE))) {
+        geo_col <- which(grepl("geo|accession|gsm", colnames(design_matrix), ignore.case = TRUE))[1]
+        colnames(design_matrix)[geo_col] <- "Sample_geo_accession"
+      }
+      
+      if (any(grepl("group|condition|treatment", colnames(design_matrix), ignore.case = TRUE))) {
+        group_col <- which(grepl("group|condition|treatment", colnames(design_matrix), ignore.case = TRUE))[1]
+        colnames(design_matrix)[group_col] <- "Group"
+      }
+    }
+  }, error = function(e) {
+    cat(sprintf("Error reading design matrix: %s\n", e$message))
+    cat("Trying with different encoding...\n")
+    design_matrix <- read.table(design_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE, fileEncoding = "UTF-8")
+  })
   
   # Print design matrix structure for debugging
   cat("Structure of design matrix:\n")
@@ -260,6 +288,7 @@ perform_de_analysis <- function(gse_id) {
   
   for (i in 1:length(samples)) {
     sample_name <- samples[i]
+    cat(sprintf("Processing sample name: %s\n", sample_name))
     
     # Check if the sample name follows the new format (GSEID_GSMID_SRRID)
     if (grepl(paste0("^", gse_id, "_GSM[0-9]+_SRR"), sample_name)) {
@@ -267,11 +296,26 @@ perform_de_analysis <- function(gse_id) {
       parts <- strsplit(sample_name, "_")[[1]]
       gsm_ids[i] <- parts[2]  # GSM ID is the second part
       sra_ids[i] <- parts[3]  # SRR ID is the third part
+      cat(sprintf("Extracted GSM ID: %s, SRA ID: %s from new format\n", gsm_ids[i], sra_ids[i]))
+    } else if (grepl("GSM[0-9]+", sample_name)) {
+      # Try to extract GSM ID using regex
+      gsm_match <- regexpr("GSM[0-9]+", sample_name)
+      if (gsm_match != -1) {
+        gsm_ids[i] <- substr(sample_name, gsm_match, gsm_match + attr(gsm_match, "match.length") - 1)
+        cat(sprintf("Extracted GSM ID: %s using regex\n", gsm_ids[i]))
+      } else {
+        # Fall back to the old format (GSEID_SRRID)
+        sra_ids[i] <- gsub("_Aligned.sortedByCoord.out.bam", "", sample_name)
+        sra_ids[i] <- gsub(paste0(gse_id, "_"), "", sra_ids[i])
+        gsm_ids[i] <- NA  # We'll need to look up the GSM ID in the mapping file
+        cat(sprintf("Could not extract GSM ID, using SRA ID: %s\n", sra_ids[i]))
+      }
     } else {
       # Fall back to the old format (GSEID_SRRID)
       sra_ids[i] <- gsub("_Aligned.sortedByCoord.out.bam", "", sample_name)
       sra_ids[i] <- gsub(paste0(gse_id, "_"), "", sra_ids[i])
       gsm_ids[i] <- NA  # We'll need to look up the GSM ID in the mapping file
+      cat(sprintf("Using old format, SRA ID: %s\n", sra_ids[i]))
     }
   }
   
@@ -338,9 +382,20 @@ perform_de_analysis <- function(gse_id) {
           Group = group,
           stringsAsFactors = FALSE
         ))
+        cat(sprintf("Matched sample %s (GSM ID: %s) to group: %s\n", 
+                    samples[i], gsm_id, group))
+      } else {
+        cat(sprintf("WARNING: Could not find a match for GSM ID %s in design matrix\n", gsm_id))
+        # Print the first few rows of the design matrix for debugging
+        cat("First few rows of design matrix:\n")
+        print(head(design_matrix))
       }
     }
   }
+  
+  # Print the design matrix for debugging
+  cat("Full design matrix:\n")
+  print(design_matrix)
   
   # Filter counts to only include samples with valid groups
   if (nrow(sample_to_group) > 0) {
@@ -355,7 +410,7 @@ perform_de_analysis <- function(gse_id) {
     print(sample_to_group$Group)
     
     # Use the original group names without simplification
-    group_factor <- factor(sample_to_group$Group)
+    group_factor <- factor(sample_to_group$Group, levels = unique(sample_to_group$Group))
     
     # Print the group factor for debugging
     cat("Group factor:\n")
@@ -366,6 +421,13 @@ perform_de_analysis <- function(gse_id) {
     # Print a table of the group assignments
     cat("Group assignments table:\n")
     print(table(group_factor))
+    
+    # Check if we have multiple groups
+    if (length(levels(group_factor)) <= 1) {
+      cat("ERROR: All samples appear to belong to the same group. Cannot perform differential expression analysis.\n")
+      cat("Please check the design matrix and sample mapping.\n")
+      return(FALSE)
+    }
   } else {
     cat("No valid samples found with matching GSM IDs in design matrix. Cannot proceed.\n")
     return(FALSE)
@@ -462,12 +524,22 @@ perform_de_analysis <- function(gse_id) {
     min_count <- 10
     min_samples <- 2
     
-    # Use filterByExpr with more stringent criteria
-    keep <- filterByExpr(y, min.count = min_count, min.total.count = 0, 
-                         large.n = 10, min.samples = min_samples)
-    y <- y[keep, , keep.lib.sizes = FALSE]
-    cat(sprintf("Kept %d genes out of %d (count >= %d in at least %d samples)\n", 
-                sum(keep), length(keep), min_count, min_samples))
+    # Check if we have multiple groups before using filterByExpr
+    if (length(levels(group_factor)) > 1) {
+      # Use filterByExpr with more stringent criteria
+      keep <- filterByExpr(y, min.count = min_count, min.total.count = 0, 
+                           large.n = 10, min.samples = min_samples, group = group_factor)
+      y <- y[keep, , keep.lib.sizes = FALSE]
+      cat(sprintf("Kept %d genes out of %d (count >= %d in at least %d samples)\n", 
+                  sum(keep), length(keep), min_count, min_samples))
+    } else {
+      # If we don't have multiple groups, use a simpler filtering approach
+      cat("WARNING: Not enough groups for filterByExpr. Using simple count filtering...\n")
+      keep <- rowSums(y$counts >= min_count) >= min_samples
+      y <- y[keep, , keep.lib.sizes = FALSE]
+      cat(sprintf("Kept %d genes out of %d (count >= %d in at least %d samples)\n", 
+                  sum(keep), length(keep), min_count, min_samples))
+    }
   }
   
   # If we're still keeping too many genes, apply additional filtering
