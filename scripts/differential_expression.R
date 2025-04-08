@@ -14,7 +14,10 @@ required_packages <- c(
   "ggplot2",
   "pheatmap",
   "stringr",
-  "data.table"
+  "data.table",
+  "plotly",  # Add plotly for interactive plots
+  "dplyr",   # Add dplyr for data manipulation
+  "htmlwidgets"  # For saving interactive plots
 )
 
 for (pkg in required_packages) {
@@ -653,20 +656,108 @@ perform_de_analysis <- function(gse_id) {
     
     # Create MA plot
     cat(sprintf("Creating MA plot for %s...\n", contrast_name))
-    pdf(file.path(output_dir, paste0(gse_id, "_", contrast_name, "_ma_plot.pdf")))
-    plotMD(qlf)
-    abline(h = c(-1, 1), col = "blue")
-    dev.off()
+    
+    # Create interactive MA plot with plotly
+    ma_data <- data.frame(
+      logCPM = qlf$table$logCPM,
+      logFC = qlf$table$logFC,
+      FDR = qlf$table$FDR,
+      genes = rownames(qlf$table)
+    )
+    
+    # Add significance information
+    ma_data$Significance <- dplyr::case_when(
+      ma_data$FDR < 0.05 & ma_data$logFC > 1 ~ "Upregulated",
+      ma_data$FDR < 0.05 & ma_data$logFC < -1 ~ "Downregulated",
+      TRUE ~ "Not Significant"
+    )
+    
+    # Define colors for the points
+    color_map <- c("Upregulated" = "#c46666", "Downregulated" = "#1a80bb", "Not Significant" = "#b0b0b0")
+    
+    # Create interactive MA plot
+    ma_plot <- plot_ly(
+      data = ma_data,
+      x = ~logCPM,
+      y = ~logFC,
+      text = ~paste("Gene:", genes,
+                    "<br>logCPM:", round(logCPM, 2),
+                    "<br>logFC:", round(logFC, 2),
+                    "<br>FDR:", formatC(FDR, format = "e", digits = 2)),
+      hoverinfo = "text",
+      mode = "markers",
+      marker = list(size = 6)
+    ) %>%
+      add_markers(
+        color = ~Significance,
+        colors = color_map
+      ) %>%
+      layout(
+        title = paste("MA Plot:", contrast_name),
+        xaxis = list(title = "logCPM"),
+        yaxis = list(title = "logFC"),
+        shapes = list(
+          list(type = "line", x0 = min(ma_data$logCPM), x1 = max(ma_data$logCPM), 
+               y0 = 1, y1 = 1, line = list(dash = "dash", color = "black"), opacity = 0.3),
+          list(type = "line", x0 = min(ma_data$logCPM), x1 = max(ma_data$logCPM), 
+               y0 = -1, y1 = -1, line = list(dash = "dash", color = "black"), opacity = 0.3)
+        )
+      )
+    
+    # Save the interactive plot
+    htmlwidgets::saveWidget(ma_plot, file.path(output_dir, paste0(gse_id, "_", contrast_name, "_ma_plot.html")), selfcontained = TRUE)
     
     # Create volcano plot
     cat(sprintf("Creating volcano plot for %s...\n", contrast_name))
-    pdf(file.path(output_dir, paste0(gse_id, "_", contrast_name, "_volcano_plot.pdf")))
-    with(res$table, plot(logFC, -log10(FDR), pch = 20, main = paste("Volcano Plot:", contrast_name),
-                        xlim = c(-5, 5), ylim = c(0, 10)))
-    with(subset(res$table, FDR < 0.05 & abs(logFC) > 1), points(logFC, -log10(FDR), pch = 20, col = "red"))
-    abline(h = -log10(0.05), col = "blue", lty = 2)
-    abline(v = c(-1, 1), col = "blue", lty = 2)
-    dev.off()
+    
+    # Add logP for y axis
+    volcano_data <- data.frame(
+      logFC = res$table$logFC,
+      FDR = res$table$FDR,
+      genes = rownames(res$table)
+    )
+    volcano_data$logP <- -log10(volcano_data$FDR)
+    
+    # Define significance thresholds
+    volcano_data$Significance <- dplyr::case_when(
+      volcano_data$FDR < 0.05 & volcano_data$logFC > 1 ~ "Upregulated",
+      volcano_data$FDR < 0.05 & volcano_data$logFC < -1 ~ "Downregulated",
+      TRUE ~ "Not Significant"
+    )
+    
+    # Create interactive volcano plot
+    volcano_plot <- plot_ly(
+      data = volcano_data,
+      x = ~logFC,
+      y = ~logP,
+      text = ~paste("Gene:", genes,
+                    "<br>logFC:", round(logFC, 2),
+                    "<br>FDR:", formatC(FDR, format = "e", digits = 2)),
+      hoverinfo = "text",
+      mode = "markers",
+      marker = list(size = 6)
+    ) %>%
+      add_markers(
+        color = ~Significance,
+        colors = color_map
+      ) %>%
+      layout(
+        title = paste("Volcano Plot:", contrast_name),
+        xaxis = list(title = "log2 Fold Change"),
+        yaxis = list(title = "-log10(FDR)"),
+        shapes = list(
+          list(type = "line", x0 = -1, x1 = -1, y0 = 0, y1 = max(volcano_data$logP), 
+               line = list(dash = "dot"), opacity = 0.5),
+          list(type = "line", x0 = 1, x1 = 1, y0 = 0, y1 = max(volcano_data$logP), 
+               line = list(dash = "dot"), opacity = 0.5),
+          list(type = "line", x0 = min(volcano_data$logFC), x1 = max(volcano_data$logFC), 
+               y0 = -log10(0.05), y1 = -log10(0.05), 
+               line = list(dash = "dash", color = "black"), opacity = 0.3)
+        )
+      )
+    
+    # Save the interactive plot
+    htmlwidgets::saveWidget(volcano_plot, file.path(output_dir, paste0(gse_id, "_", contrast_name, "_volcano_plot.html")), selfcontained = TRUE)
   }
   
   # Save all results
@@ -724,6 +815,7 @@ perform_de_analysis <- function(gse_id) {
         )
         
         # Create heatmap with more robust parameters
+        # Save as PDF for static view
         pdf(file.path(output_dir, paste0(gse_id, "_de_heatmap.pdf")))
         pheatmap(de_expr_scaled,
                 main = "Differentially Expressed Genes",
@@ -733,6 +825,31 @@ perform_de_analysis <- function(gse_id) {
                 annotation_col = sample_annotation,
                 na_col = "grey")  # Color NA values in grey
         dev.off()
+        
+        # Create interactive heatmap with plotly
+        # Convert to data frame for plotly
+        heatmap_df <- as.data.frame(de_expr_scaled)
+        heatmap_df$genes <- rownames(heatmap_df)
+        
+        # Create interactive heatmap
+        heatmap_plot <- plot_ly(
+          x = colnames(de_expr_scaled),
+          y = rownames(de_expr_scaled),
+          z = as.matrix(de_expr_scaled),
+          type = "heatmap",
+          colorscale = "RdBu",  # Red for upregulated, blue for downregulated
+          reversescale = TRUE,
+          colorbar = list(title = "Z-score")
+        ) %>%
+          layout(
+            title = "Differentially Expressed Genes",
+            xaxis = list(title = "Samples"),
+            yaxis = list(title = "Genes")
+          )
+        
+        # Save the interactive plot
+        htmlwidgets::saveWidget(heatmap_plot, file.path(output_dir, paste0(gse_id, "_de_heatmap.html")), selfcontained = TRUE)
+        
         cat(sprintf("Created heatmap with %d differentially expressed genes\n", length(all_de_genes)))
       }, error = function(e) {
         cat(sprintf("Error during heatmap creation: %s\n", e$message))
