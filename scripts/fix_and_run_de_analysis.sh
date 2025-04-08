@@ -40,6 +40,16 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# Run the fix design matrix script
+echo "Fixing design matrix..."
+Rscript "$BASE_DIR/scripts/fix_design_matrix.R" "$GSE_ID" > "$BASE_DIR/logs/fix_de_analysis/fix_design_matrix.log" 2>&1
+
+# Check if the script ran successfully
+if [ $? -ne 0 ]; then
+  echo "Error fixing design matrix. Check the log file for details."
+  exit 1
+fi
+
 # Run the differential expression analysis
 echo "Running differential expression analysis..."
 Rscript "$BASE_DIR/scripts/differential_expression.R" "$GSE_ID" > "$BASE_DIR/logs/fix_de_analysis/differential_expression.log" 2>&1
@@ -54,11 +64,22 @@ if [ $? -ne 0 ]; then
   
   # Check if the script ran successfully
   if [ $? -ne 0 ]; then
-    echo "Error running modified differential expression analysis. Check the log file for details."
-    exit 1
+    echo "Error running modified differential expression analysis. Trying fixed approach..."
+    
+    # Run the fixed differential expression analysis
+    echo "Running fixed differential expression analysis..."
+    Rscript "$BASE_DIR/scripts/differential_expression_fixed.R" "$GSE_ID" > "$BASE_DIR/logs/fix_de_analysis/differential_expression_fixed.log" 2>&1
+    
+    # Check if the script ran successfully
+    if [ $? -ne 0 ]; then
+      echo "Error running fixed differential expression analysis. Check the log file for details."
+      exit 1
+    fi
+    
+    echo "Fixed differential expression analysis completed successfully."
+  else
+    echo "Modified differential expression analysis completed successfully."
   fi
-  
-  echo "Modified differential expression analysis completed successfully."
 else
   echo "Differential expression analysis completed successfully."
 fi
