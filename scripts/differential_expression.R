@@ -189,15 +189,37 @@ perform_de_analysis <- function(gse_id) {
   # Create a mapping between SRA IDs and GEO accession IDs
   cat("Creating mapping between SRA IDs and GEO accession IDs...\n")
   
-  # Extract SRA IDs from the sample names (assuming format like SRR12345678_Aligned.sortedByCoord.out.bam)
-  sra_ids <- gsub("_Aligned.sortedByCoord.out.bam", "", samples)
-  sra_ids <- gsub(paste0(gse_id, "_"), "", sra_ids)
+  # Extract SRA IDs and GSM IDs from the sample names
+  # Check for new format (GSEID_GSMID_SRRID) first
+  sra_ids <- character(length(samples))
+  gsm_ids <- character(length(samples))
+  
+  for (i in 1:length(samples)) {
+    sample_name <- samples[i]
+    
+    # Check if the sample name follows the new format (GSEID_GSMID_SRRID)
+    if (grepl(paste0("^", gse_id, "_GSM[0-9]+_SRR"), sample_name)) {
+      # Extract GSM ID and SRR ID from the new format
+      parts <- strsplit(sample_name, "_")[[1]]
+      gsm_ids[i] <- parts[2]  # GSM ID is the second part
+      sra_ids[i] <- parts[3]  # SRR ID is the third part
+    } else {
+      # Fall back to the old format (GSEID_SRRID)
+      sra_ids[i] <- gsub("_Aligned.sortedByCoord.out.bam", "", sample_name)
+      sra_ids[i] <- gsub(paste0(gse_id, "_"), "", sra_ids[i])
+      gsm_ids[i] <- NA  # We'll need to look up the GSM ID in the mapping file
+    }
+  }
+  
   cat("Extracted SRA IDs:\n")
   cat(paste(sra_ids, collapse = ", "), "\n")
   
-  # Try to find a mapping file
+  cat("Extracted GSM IDs:\n")
+  cat(paste(gsm_ids, collapse = ", "), "\n")
+  
+  # Try to find a mapping file for samples with missing GSM IDs
   mapping_file <- file.path(base_dir, "sample_design", "sample_design", "sra_to_geo_mapping.txt")
-  if (file.exists(mapping_file)) {
+  if (file.exists(mapping_file) && any(is.na(gsm_ids))) {
     cat(sprintf("Found mapping file at: %s\n", mapping_file))
     mapping <- read.table(mapping_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
     
@@ -205,79 +227,70 @@ perform_de_analysis <- function(gse_id) {
     if ("SRA_ID" %in% colnames(mapping) && "GEO_ID" %in% colnames(mapping)) {
       cat("Mapping file has required columns.\n")
       
-      # Filter mapping to only include SRA IDs in our samples
-      mapping <- mapping[mapping$SRA_ID %in% sra_ids, ]
+      # Filter mapping to only include SRA IDs in our samples that don't have GSM IDs
+      missing_gsm_indices <- which(is.na(gsm_ids))
+      missing_sra_ids <- sra_ids[missing_gsm_indices]
+      mapping <- mapping[mapping$SRA_ID %in% missing_sra_ids, ]
       
       if (nrow(mapping) > 0) {
         cat(sprintf("Found %d mappings between SRA IDs and GEO IDs.\n", nrow(mapping)))
         
-        # Filter design matrix to only include GEO IDs in our mapping
-        design_matrix <- design_matrix[design_matrix$Sample_geo_accession %in% mapping$GEO_ID, ]
-        
-        if (nrow(design_matrix) > 0) {
-          cat(sprintf("Filtered design matrix to %d samples.\n", nrow(design_matrix)))
+        # Update GSM IDs for samples with missing GSM IDs
+        for (i in 1:nrow(mapping)) {
+          sra_id <- mapping$SRA_ID[i]
+          geo_id <- mapping$GEO_ID[i]
           
-          # Create a mapping from SRA IDs to groups
-          sra_to_group <- data.frame(
-            SRA_ID = character(),
-            Group = character(),
-            stringsAsFactors = FALSE
-          )
-          
-          for (i in 1:nrow(mapping)) {
-            geo_id <- mapping$GEO_ID[i]
-            sra_id <- mapping$SRA_ID[i]
-            group <- design_matrix$Group[design_matrix$Sample_geo_accession == geo_id]
-            
-            if (length(group) > 0) {
-              sra_to_group <- rbind(sra_to_group, data.frame(
-                SRA_ID = sra_id,
-                Group = group,
-                stringsAsFactors = FALSE
-              ))
-            }
+          # Find the index of this SRA ID in our samples
+          sra_index <- which(sra_ids == sra_id)
+          if (length(sra_index) > 0) {
+            gsm_ids[sra_index] <- geo_id
           }
-          
-          # Filter counts to only include samples with valid groups
-          valid_sra_ids <- sra_to_group$SRA_ID
-          valid_samples <- paste0(gse_id, "_", valid_sra_ids, "_Aligned.sortedByCoord.out.bam")
-          valid_samples <- valid_samples[valid_samples %in% samples]
-          
-          if (length(valid_samples) > 0) {
-            cat(sprintf("Filtering counts to %d samples with valid groups.\n", length(valid_samples)))
-            counts <- counts[, valid_samples]
-            
-            # Create a factor for the groups
-            group_factor <- factor(sra_to_group$Group)
-          } else {
-            cat("No valid samples found after filtering. Cannot proceed.\n")
-            return(FALSE)
-          }
-        } else {
-          cat("No matching GEO IDs found in design matrix. Cannot proceed.\n")
-          return(FALSE)
         }
-      } else {
-        cat("No matching SRA IDs found in mapping file. Cannot proceed.\n")
-        return(FALSE)
+        
+        cat("Updated GSM IDs from mapping file:\n")
+        cat(paste(gsm_ids, collapse = ", "), "\n")
       }
-    } else {
-      cat("Mapping file does not have required columns. Cannot proceed.\n")
-      return(FALSE)
     }
+  }
+  
+  # Create a mapping from sample indices to groups
+  sample_to_group <- data.frame(
+    Sample_Index = integer(),
+    Group = character(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Match samples to their groups using GSM IDs
+  for (i in 1:length(samples)) {
+    gsm_id <- gsm_ids[i]
+    
+    if (!is.na(gsm_id)) {
+      # Find the row in the design matrix that matches this GSM ID
+      match_idx <- which(design_matrix$Sample_geo_accession == gsm_id)
+      if (length(match_idx) > 0) {
+        group <- design_matrix$Group[match_idx]
+        sample_to_group <- rbind(sample_to_group, data.frame(
+          Sample_Index = i,
+          Group = group,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+  }
+  
+  # Filter counts to only include samples with valid groups
+  if (nrow(sample_to_group) > 0) {
+    valid_indices <- sample_to_group$Sample_Index
+    valid_samples <- samples[valid_indices]
+    
+    cat(sprintf("Filtering counts to %d samples with valid groups.\n", length(valid_samples)))
+    counts <- counts[, valid_samples]
+    
+    # Create a factor for the groups
+    group_factor <- factor(sample_to_group$Group)
   } else {
-    cat("No mapping file found. Attempting to use all samples in design matrix...\n")
-    
-    # If we don't have a mapping file, we'll try to use all samples in the design matrix
-    # This is a fallback approach and might not work in all cases
-    if (ncol(counts) != nrow(design_matrix)) {
-      cat(sprintf("Number of samples in counts (%d) does not match number of samples in design matrix (%d). Cannot proceed.\n", 
-                  ncol(counts), nrow(design_matrix)))
-      return(FALSE)
-    }
-    
-    # Create a factor from group information
-    group_factor <- factor(design_matrix$Group)
+    cat("No valid samples found with matching GSM IDs in design matrix. Cannot proceed.\n")
+    return(FALSE)
   }
   
   # Create DGEList object
