@@ -3,7 +3,7 @@
 #SBATCH --job-name=diff_exp
 #SBATCH --output=logs/differential_expression/diff_exp_%A_%a.out
 #SBATCH --error=logs/differential_expression/diff_exp_%A_%a.err
-#SBATCH --time=04:00:00
+#SBATCH --time=00:15:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=1-1
