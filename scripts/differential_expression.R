@@ -370,15 +370,18 @@ perform_de_analysis <- function(gse_id) {
   
   # Create contrasts for all pairwise comparisons
   cat("Creating contrasts...\n")
-  groups <- levels(group_factor)
   contrasts <- list()
+  
+  # Get the group levels from the design matrix column names
+  groups <- colnames(design)
+  cat(sprintf("Groups found: %s\n", paste(groups, collapse = ", ")))
   
   if (length(groups) > 1) {
     for (i in 1:(length(groups) - 1)) {
       for (j in (i + 1):length(groups)) {
         contrast_name <- paste0(groups[j], "_vs_", groups[i])
         contrasts[[contrast_name]] <- makeContrasts(
-          paste0("group_factor", groups[j], " - group_factor", groups[i]),
+          paste0(groups[j], " - ", groups[i]),
           levels = design
         )
       }
