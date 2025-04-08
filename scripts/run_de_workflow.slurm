@@ -3,7 +3,7 @@
 #SBATCH --job-name=de_workflow
 #SBATCH --output=logs/de_workflow/de_workflow_%A_%a.out
 #SBATCH --error=logs/de_workflow/de_workflow_%A_%a.err
-#SBATCH --time=06:00:00
+#SBATCH --time=00:10:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=1-1
