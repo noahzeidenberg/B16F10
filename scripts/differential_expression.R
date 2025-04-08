@@ -629,19 +629,56 @@ perform_de_analysis <- function(gse_id) {
       # Extract expression data for differentially expressed genes
       de_expr <- y$counts[all_de_genes, ]
       
-      # Scale for better visualization
-      # Note: Since we're working with log-transformed values, we can use scale() directly
-      de_expr_scaled <- t(scale(t(de_expr)))
+      # Handle extreme values
+      cat("Processing expression data for heatmap...\n")
+      cat("Original expression data summary:\n")
+      print(summary(as.vector(de_expr)))
       
-      # Create heatmap
-      pdf(file.path(output_dir, paste0(gse_id, "_de_heatmap.pdf")))
-      pheatmap(de_expr_scaled, 
-               main = "Differentially Expressed Genes",
-               scale = "none",
-               clustering_method = "ward.D2",
-               show_rownames = FALSE)
-      dev.off()
-      cat(sprintf("Created heatmap with %d differentially expressed genes\n", length(all_de_genes)))
+      # Log transform the data to handle extreme values
+      de_expr_log <- log2(de_expr + 1)
+      cat("Log-transformed expression data summary:\n")
+      print(summary(as.vector(de_expr_log)))
+      
+      # Scale the log-transformed data
+      tryCatch({
+        de_expr_scaled <- t(scale(t(de_expr_log)))
+        cat("Scaled expression data summary:\n")
+        print(summary(as.vector(de_expr_scaled)))
+        
+        # Remove any remaining infinite values
+        de_expr_scaled[is.infinite(de_expr_scaled)] <- NA
+        
+        # Calculate row means for sorting
+        row_means <- rowMeans(de_expr_scaled, na.rm = TRUE)
+        # Sort rows by mean expression
+        de_expr_scaled <- de_expr_scaled[order(row_means, decreasing = TRUE), ]
+        
+        # Create annotation for samples
+        sample_annotation <- data.frame(
+          Group = group_factor,
+          row.names = colnames(de_expr_scaled)
+        )
+        
+        # Create heatmap with more robust parameters
+        pdf(file.path(output_dir, paste0(gse_id, "_de_heatmap.pdf")))
+        pheatmap(de_expr_scaled,
+                main = "Differentially Expressed Genes",
+                scale = "none",  # Already scaled
+                clustering_method = "ward.D2",
+                show_rownames = FALSE,
+                annotation_col = sample_annotation,
+                na_col = "grey")  # Color NA values in grey
+        dev.off()
+        cat(sprintf("Created heatmap with %d differentially expressed genes\n", length(all_de_genes)))
+      }, error = function(e) {
+        cat(sprintf("Error during heatmap creation: %s\n", e$message))
+        cat("Expression data statistics:\n")
+        cat("Number of genes:", nrow(de_expr_scaled), "\n")
+        cat("Number of samples:", ncol(de_expr_scaled), "\n")
+        cat("Number of NA values:", sum(is.na(de_expr_scaled)), "\n")
+        cat("Number of infinite values:", sum(is.infinite(de_expr_scaled)), "\n")
+        return(FALSE)
+      })
     } else {
       cat("No differentially expressed genes found for any contrast\n")
     }
