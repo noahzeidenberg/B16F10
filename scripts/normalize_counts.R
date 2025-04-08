@@ -237,6 +237,27 @@ main <- function(gse_id = NULL) {
     }
   }
   
+  # Filter counts matrix to only include samples from the current GSE
+  cat(sprintf("Filtering counts matrix to only include samples from %s...\n", gse_id))
+  
+  # Get all sample names
+  all_samples <- colnames(counts_matrix)
+  cat(sprintf("Total samples in batch-corrected counts: %d\n", length(all_samples)))
+  
+  # Filter samples for the current GSE
+  # Check for both old format (GSEID_SRRID) and new format (GSEID_GSMID_SRRID)
+  gse_samples <- all_samples[grepl(paste0("^", gse_id, "_"), all_samples)]
+  cat(sprintf("Samples for %s: %d\n", gse_id, length(gse_samples)))
+  
+  if (length(gse_samples) == 0) {
+    cat(sprintf("Error: No samples found for %s in batch-corrected counts\n", gse_id))
+    return(1)
+  }
+  
+  # Subset the counts matrix to only include samples from the current GSE
+  counts_matrix <- counts_matrix[, gse_samples]
+  cat(sprintf("Filtered counts matrix dimensions: %d rows x %d columns\n", nrow(counts_matrix), ncol(counts_matrix)))
+  
   # Load gene length information
   ref_gtf <- file.path("~/scratch/B16F10/mm39/GCF_000001635.27_GRCm39_genomic.gtf")
   if (!file.exists(ref_gtf)) {

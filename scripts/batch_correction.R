@@ -210,7 +210,40 @@ collect_feature_counts <- function(base_dir, design_matrices, srr_to_gsm) {
       }
       
       # Add GSE ID to sample names to make them unique
-      new_samples <- paste0(gse_id, "_", samples)
+      # Extract SRR IDs from the sample names
+      srr_ids <- samples
+      for (i in 1:length(samples)) {
+        sample_id <- samples[i]
+        
+        # Extract SRR ID from the sample ID if it's a BAM file
+        if (grepl("_Aligned\\.sortedByCoord\\.out\\.bam$", sample_id)) {
+          srr_ids[i] <- gsub("_Aligned\\.sortedByCoord\\.out\\.bam$", "", sample_id)
+        } else if (grepl("^SRR", sample_id)) {
+          srr_ids[i] <- sample_id
+        }
+      }
+      
+      # Get GSM IDs for each sample
+      gsm_ids <- rep(NA, length(samples))
+      for (i in 1:length(samples)) {
+        srr_id <- srr_ids[i]
+        if (srr_id %in% names(srr_to_gsm)) {
+          gsm_ids[i] <- srr_to_gsm[[srr_id]]
+        }
+      }
+      
+      # Create new sample names with GSE ID, GSM ID, and SRR ID
+      new_samples <- samples
+      for (i in 1:length(samples)) {
+        if (!is.na(gsm_ids[i])) {
+          # If we have a GSM ID, use the new format
+          new_samples[i] <- paste0(gse_id, "_", gsm_ids[i], "_", srr_ids[i])
+        } else {
+          # If we don't have a GSM ID, use the old format
+          new_samples[i] <- paste0(gse_id, "_", samples[i])
+        }
+      }
+      
       colnames(counts) <- new_samples
       
       # Get group information from design matrix if available
