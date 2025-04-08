@@ -5,26 +5,87 @@
 cat("=== Starting Differential Expression Analysis ===\n")
 cat("Loading required packages...\n")
 
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
+# Function to safely load packages with offline fallback
+safe_load_package <- function(pkg, bioc_pkg = FALSE) {
+  cat(sprintf("Loading package: %s\n", pkg))
+  
+  # First try to load the package directly
+  if (requireNamespace(pkg, quietly = TRUE)) {
+    library(pkg, character.only = TRUE)
+    return(TRUE)
+  }
+  
+  # If direct loading fails, try to install
+  cat(sprintf("Package %s not found. Attempting to install...\n", pkg))
+  
+  # Check if we're offline
+  is_offline <- !curl::has_internet()
+  if (is_offline) {
+    cat("No internet connection detected. Cannot install packages.\n")
+    cat("Please ensure all required packages are installed before running in offline mode.\n")
+    return(FALSE)
+  }
+  
+  # Try to install the package
+  tryCatch({
+    if (bioc_pkg) {
+      if (!requireNamespace("BiocManager", quietly = TRUE)) {
+        install.packages("BiocManager")
+      }
+      BiocManager::install(pkg)
+    } else {
+      install.packages(pkg)
+    }
+    library(pkg, character.only = TRUE)
+    return(TRUE)
+  }, error = function(e) {
+    cat(sprintf("Error installing package %s: %s\n", pkg, e$message))
+    return(FALSE)
+  })
+}
 
-required_packages <- c(
-  "edgeR",
-  "limma",
-  "ggplot2",
-  "pheatmap",
-  "stringr",
-  "data.table",
-  "plotly",  # Add plotly for interactive plots
-  "dplyr",   # Add dplyr for data manipulation
-  "htmlwidgets"  # For saving interactive plots
+# List of required packages with their source
+required_packages <- list(
+  "edgeR" = TRUE,        # Bioconductor
+  "limma" = TRUE,        # Bioconductor
+  "ggplot2" = FALSE,     # CRAN
+  "pheatmap" = FALSE,    # CRAN
+  "stringr" = FALSE,     # CRAN
+  "data.table" = FALSE,  # CRAN
+  "plotly" = FALSE,      # CRAN
+  "dplyr" = FALSE,       # CRAN
+  "htmlwidgets" = FALSE, # CRAN
+  "curl" = FALSE         # CRAN - for internet connectivity check
 )
 
-for (pkg in required_packages) {
-  cat(sprintf("Loading package: %s\n", pkg))
-  if (!requireNamespace(pkg, quietly = TRUE))
-    BiocManager::install(pkg)
-  library(pkg, character.only = TRUE)
+# Load curl first to check internet connectivity
+if (!safe_load_package("curl", bioc_pkg = FALSE)) {
+  cat("Warning: Could not load 'curl' package. Internet connectivity check will be skipped.\n")
+}
+
+# Load all packages
+packages_loaded <- TRUE
+for (pkg in names(required_packages)) {
+  if (!safe_load_package(pkg, bioc_pkg = required_packages[[pkg]])) {
+    cat(sprintf("Failed to load package: %s\n", pkg))
+    packages_loaded <- FALSE
+  }
+}
+
+# Check if all packages were loaded successfully
+if (!packages_loaded) {
+  cat("Some required packages could not be loaded. The script may not function correctly.\n")
+  cat("Please ensure all required packages are installed before running the script.\n")
+  cat("You can install them manually with:\n")
+  cat("install.packages(c('ggplot2', 'pheatmap', 'stringr', 'data.table', 'plotly', 'dplyr', 'htmlwidgets', 'curl'))\n")
+  cat("BiocManager::install(c('edgeR', 'limma'))\n")
+  
+  # Ask if the user wants to continue anyway
+  cat("Do you want to continue anyway? (y/n): ")
+  user_input <- readline()
+  if (tolower(user_input) != "y") {
+    stop("Script execution aborted due to missing packages.")
+  }
 }
 
 # Function to find design matrix file
@@ -654,110 +715,175 @@ perform_de_analysis <- function(gse_id) {
     write.table(res$table, res_file, sep = "\t", quote = FALSE)
     cat(sprintf("Saved results to: %s\n", res_file))
     
-    # Create MA plot
-    cat(sprintf("Creating MA plot for %s...\n", contrast_name))
-    
-    # Create interactive MA plot with plotly
-    ma_data <- data.frame(
-      logCPM = qlf$table$logCPM,
-      logFC = qlf$table$logFC,
-      FDR = qlf$table$FDR,
-      genes = rownames(qlf$table)
-    )
-    
-    # Add significance information
-    ma_data$Significance <- dplyr::case_when(
-      ma_data$FDR < 0.05 & ma_data$logFC > 1 ~ "Upregulated",
-      ma_data$FDR < 0.05 & ma_data$logFC < -1 ~ "Downregulated",
-      TRUE ~ "Not Significant"
-    )
-    
-    # Define colors for the points
-    color_map <- c("Upregulated" = "#c46666", "Downregulated" = "#1a80bb", "Not Significant" = "#b0b0b0")
-    
-    # Create interactive MA plot
-    ma_plot <- plot_ly(
-      data = ma_data,
-      x = ~logCPM,
-      y = ~logFC,
-      text = ~paste("Gene:", genes,
-                    "<br>logCPM:", round(logCPM, 2),
-                    "<br>logFC:", round(logFC, 2),
-                    "<br>FDR:", formatC(FDR, format = "e", digits = 2)),
-      hoverinfo = "text",
-      mode = "markers",
-      marker = list(size = 6)
-    ) %>%
-      add_markers(
-        color = ~Significance,
-        colors = color_map
-      ) %>%
-      layout(
-        title = paste("MA Plot:", contrast_name),
-        xaxis = list(title = "logCPM"),
-        yaxis = list(title = "logFC"),
-        shapes = list(
-          list(type = "line", x0 = min(ma_data$logCPM), x1 = max(ma_data$logCPM), 
-               y0 = 1, y1 = 1, line = list(dash = "dash", color = "black"), opacity = 0.3),
-          list(type = "line", x0 = min(ma_data$logCPM), x1 = max(ma_data$logCPM), 
-               y0 = -1, y1 = -1, line = list(dash = "dash", color = "black"), opacity = 0.3)
+    # Create plots with error handling
+    tryCatch({
+      # Create MA plot
+      cat(sprintf("Creating MA plot for %s...\n", contrast_name))
+      
+      # Debug information
+      cat("DEBUG: Structure of qlf object:\n")
+      str(qlf)
+      
+      cat("DEBUG: Structure of qlf$table:\n")
+      str(qlf$table)
+      
+      # Check if all required columns exist
+      required_cols <- c("logCPM", "logFC", "FDR")
+      missing_cols <- required_cols[!required_cols %in% colnames(qlf$table)]
+      if (length(missing_cols) > 0) {
+        cat(sprintf("DEBUG: Missing columns in qlf$table: %s\n", paste(missing_cols, collapse=", ")))
+      }
+      
+      # Check dimensions of each component
+      cat("DEBUG: Number of rows in qlf$table:", nrow(qlf$table), "\n")
+      cat("DEBUG: Number of rows in rownames(qlf$table):", length(rownames(qlf$table)), "\n")
+      
+      # Create interactive MA plot with plotly
+      tryCatch({
+        ma_data <- data.frame(
+          logCPM = qlf$table$logCPM,
+          logFC = qlf$table$logFC,
+          FDR = qlf$table$FDR,
+          genes = rownames(qlf$table)
         )
-      )
-    
-    # Save the interactive plot
-    htmlwidgets::saveWidget(ma_plot, file.path(output_dir, paste0(gse_id, "_", contrast_name, "_ma_plot.html")), selfcontained = TRUE)
-    
-    # Create volcano plot
-    cat(sprintf("Creating volcano plot for %s...\n", contrast_name))
-    
-    # Add logP for y axis
-    volcano_data <- data.frame(
-      logFC = res$table$logFC,
-      FDR = res$table$FDR,
-      genes = rownames(res$table)
-    )
-    volcano_data$logP <- -log10(volcano_data$FDR)
-    
-    # Define significance thresholds
-    volcano_data$Significance <- dplyr::case_when(
-      volcano_data$FDR < 0.05 & volcano_data$logFC > 1 ~ "Upregulated",
-      volcano_data$FDR < 0.05 & volcano_data$logFC < -1 ~ "Downregulated",
-      TRUE ~ "Not Significant"
-    )
-    
-    # Create interactive volcano plot
-    volcano_plot <- plot_ly(
-      data = volcano_data,
-      x = ~logFC,
-      y = ~logP,
-      text = ~paste("Gene:", genes,
-                    "<br>logFC:", round(logFC, 2),
-                    "<br>FDR:", formatC(FDR, format = "e", digits = 2)),
-      hoverinfo = "text",
-      mode = "markers",
-      marker = list(size = 6)
-    ) %>%
-      add_markers(
-        color = ~Significance,
-        colors = color_map
-      ) %>%
-      layout(
-        title = paste("Volcano Plot:", contrast_name),
-        xaxis = list(title = "log2 Fold Change"),
-        yaxis = list(title = "-log10(FDR)"),
-        shapes = list(
-          list(type = "line", x0 = -1, x1 = -1, y0 = 0, y1 = max(volcano_data$logP), 
-               line = list(dash = "dot"), opacity = 0.5),
-          list(type = "line", x0 = 1, x1 = 1, y0 = 0, y1 = max(volcano_data$logP), 
-               line = list(dash = "dot"), opacity = 0.5),
-          list(type = "line", x0 = min(volcano_data$logFC), x1 = max(volcano_data$logFC), 
-               y0 = -log10(0.05), y1 = -log10(0.05), 
-               line = list(dash = "dash", color = "black"), opacity = 0.3)
+        
+        # Add significance information
+        ma_data$Significance <- dplyr::case_when(
+          ma_data$FDR < 0.05 & ma_data$logFC > 1 ~ "Upregulated",
+          ma_data$FDR < 0.05 & ma_data$logFC < -1 ~ "Downregulated",
+          TRUE ~ "Not Significant"
         )
-      )
-    
-    # Save the interactive plot
-    htmlwidgets::saveWidget(volcano_plot, file.path(output_dir, paste0(gse_id, "_", contrast_name, "_volcano_plot.html")), selfcontained = TRUE)
+        
+        # Define colors for the points
+        color_map <- c("Upregulated" = "#c46666", "Downregulated" = "#1a80bb", "Not Significant" = "#b0b0b0")
+        
+        # Create interactive MA plot
+        ma_plot <- plot_ly(
+          data = ma_data,
+          x = ~logCPM,
+          y = ~logFC,
+          text = ~paste("Gene:", genes,
+                        "<br>logCPM:", round(logCPM, 2),
+                        "<br>logFC:", round(logFC, 2),
+                        "<br>FDR:", formatC(FDR, format = "e", digits = 2)),
+          hoverinfo = "text",
+          mode = "markers",
+          marker = list(size = 6)
+        ) %>%
+          add_markers(
+            color = ~Significance,
+            colors = color_map
+          ) %>%
+          layout(
+            title = paste("MA Plot:", contrast_name),
+            xaxis = list(title = "logCPM"),
+            yaxis = list(title = "logFC"),
+            shapes = list(
+              list(type = "line", x0 = min(ma_data$logCPM), x1 = max(ma_data$logCPM), 
+                   y0 = 1, y1 = 1, line = list(dash = "dash", color = "black"), opacity = 0.3),
+              list(type = "line", x0 = min(ma_data$logCPM), x1 = max(ma_data$logCPM), 
+                   y0 = -1, y1 = -1, line = list(dash = "dash", color = "black"), opacity = 0.3)
+            )
+          )
+        
+        # Save the interactive plot
+        htmlwidgets::saveWidget(ma_plot, file.path(output_dir, paste0(gse_id, "_", contrast_name, "_ma_plot.html")), selfcontained = TRUE)
+      }, error = function(e) {
+        cat(sprintf("Error creating MA plot: %s\n", e$message))
+        
+        # Fallback to simple MA plot
+        cat("Creating fallback MA plot...\n")
+        pdf(file.path(output_dir, paste0(gse_id, "_", contrast_name, "_ma_plot_fallback.pdf")))
+        plotMD(qlf)
+        abline(h = c(-1, 1), col = "blue")
+        dev.off()
+      })
+      
+      # Create volcano plot
+      cat(sprintf("Creating volcano plot for %s...\n", contrast_name))
+      
+      # Debug information
+      cat("DEBUG: Structure of res$table:\n")
+      str(res$table)
+      
+      # Check if all required columns exist
+      required_cols <- c("logFC", "FDR")
+      missing_cols <- required_cols[!required_cols %in% colnames(res$table)]
+      if (length(missing_cols) > 0) {
+        cat(sprintf("DEBUG: Missing columns in res$table: %s\n", paste(missing_cols, collapse=", ")))
+      }
+      
+      # Check dimensions of each component
+      cat("DEBUG: Number of rows in res$table:", nrow(res$table), "\n")
+      cat("DEBUG: Number of rows in rownames(res$table):", length(rownames(res$table)), "\n")
+      
+      # Create volcano plot with error handling
+      tryCatch({
+        # Add logP for y axis
+        volcano_data <- data.frame(
+          logFC = res$table$logFC,
+          FDR = res$table$FDR,
+          genes = rownames(res$table)
+        )
+        volcano_data$logP <- -log10(volcano_data$FDR)
+        
+        # Define significance thresholds
+        volcano_data$Significance <- dplyr::case_when(
+          volcano_data$FDR < 0.05 & volcano_data$logFC > 1 ~ "Upregulated",
+          volcano_data$FDR < 0.05 & volcano_data$logFC < -1 ~ "Downregulated",
+          TRUE ~ "Not Significant"
+        )
+        
+        # Create interactive volcano plot
+        volcano_plot <- plot_ly(
+          data = volcano_data,
+          x = ~logFC,
+          y = ~logP,
+          text = ~paste("Gene:", genes,
+                        "<br>logFC:", round(logFC, 2),
+                        "<br>FDR:", formatC(FDR, format = "e", digits = 2)),
+          hoverinfo = "text",
+          mode = "markers",
+          marker = list(size = 6)
+        ) %>%
+          add_markers(
+            color = ~Significance,
+            colors = color_map
+          ) %>%
+          layout(
+            title = paste("Volcano Plot:", contrast_name),
+            xaxis = list(title = "log2 Fold Change"),
+            yaxis = list(title = "-log10(FDR)"),
+            shapes = list(
+              list(type = "line", x0 = -1, x1 = -1, y0 = 0, y1 = max(volcano_data$logP), 
+                   line = list(dash = "dot"), opacity = 0.5),
+              list(type = "line", x0 = 1, x1 = 1, y0 = 0, y1 = max(volcano_data$logP), 
+                   line = list(dash = "dot"), opacity = 0.5),
+              list(type = "line", x0 = min(volcano_data$logFC), x1 = max(volcano_data$logFC), 
+                   y0 = -log10(0.05), y1 = -log10(0.05), 
+                   line = list(dash = "dash", color = "black"), opacity = 0.3)
+            )
+          )
+        
+        # Save the interactive plot
+        htmlwidgets::saveWidget(volcano_plot, file.path(output_dir, paste0(gse_id, "_", contrast_name, "_volcano_plot.html")), selfcontained = TRUE)
+      }, error = function(e) {
+        cat(sprintf("Error creating volcano plot: %s\n", e$message))
+        
+        # Fallback to simple volcano plot
+        cat("Creating fallback volcano plot...\n")
+        pdf(file.path(output_dir, paste0(gse_id, "_", contrast_name, "_volcano_plot_fallback.pdf")))
+        with(res$table, plot(logFC, -log10(FDR), pch = 20, main = paste("Volcano Plot:", contrast_name),
+                            xlim = c(-5, 5), ylim = c(0, 10)))
+        with(subset(res$table, FDR < 0.05 & abs(logFC) > 1), points(logFC, -log10(FDR), pch = 20, col = "red"))
+        abline(h = -log10(0.05), col = "blue", lty = 2)
+        abline(v = c(-1, 1), col = "blue", lty = 2)
+        dev.off()
+      })
+    }, error = function(e) {
+      cat(sprintf("Error in plotting section: %s\n", e$message))
+      cat("Continuing with analysis despite plotting errors...\n")
+    })
   }
   
   # Save all results
@@ -901,8 +1027,29 @@ main <- function(gse_id = NULL) {
     }
   }
   
+  # Set up error handling
+  options(warn = 1)  # Print warnings as they occur
+  
+  # Create a log file
+  log_file <- file.path(getwd(), paste0(gse_id, "_differential_expression.log"))
+  cat(sprintf("Starting differential expression analysis for %s at %s\n", gse_id, format(Sys.time(), "%Y-%m-%d %H:%M:%S")), file = log_file)
+  
+  # Redirect output to both console and log file
+  sink(log_file, append = TRUE)
+  
   tryCatch({
     cat(sprintf("Performing differential expression analysis for %s...\n", gse_id))
+    
+    # Check if the GSE directory exists
+    base_dir <- path.expand("~/scratch/B16F10")
+    gse_dir <- file.path(base_dir, gse_id)
+    
+    if (!dir.exists(gse_dir)) {
+      cat(sprintf("GSE directory %s does not exist. Cannot proceed.\n", gse_dir))
+      return(FALSE)
+    }
+    
+    # Perform the analysis
     success <- perform_de_analysis(gse_id)
     
     if (success) {
@@ -910,9 +1057,33 @@ main <- function(gse_id = NULL) {
     } else {
       cat(sprintf("Failed to perform differential expression analysis for %s\n", gse_id))
     }
+    
+    # Close the sink
+    sink()
+    
+    # Print a summary to the console
+    cat(sprintf("Analysis for %s completed. Check the log file at %s for details.\n", gse_id, log_file))
+    
+    return(success)
   }, error = function(e) {
+    # Log the error
     cat(sprintf("Error during differential expression analysis: %s\n", e$message))
-    stop(sprintf("Error during differential expression analysis: %s", e$message))
+    cat("Stack trace:\n")
+    cat(paste(capture.output(traceback()), collapse = "\n"))
+    
+    # Close the sink
+    sink()
+    
+    # Print a summary to the console
+    cat(sprintf("Analysis for %s failed with error: %s\n", gse_id, e$message))
+    cat(sprintf("Check the log file at %s for details.\n", log_file))
+    
+    return(FALSE)
+  }, finally = {
+    # Ensure the sink is closed even if there's an error
+    if (sink.number() > 0) {
+      sink()
+    }
   })
 }
 
