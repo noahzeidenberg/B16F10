@@ -6,7 +6,7 @@
 #SBATCH --time=00:15:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=1-1
+#SBATCH --array=1-60%5
 
 # Load required modules
 module load r
@@ -18,7 +18,9 @@ cd ~/scratch/B16F10
 source ~/scratch/B16F10/.venv/bin/activate
 
 # Get GSE ID from command line or use default
-GSE_ID=${1:-GSE287957}
+#GSE_ID=${1:-GSE287957}
+# Get the GSE ID for this array task
+GSE_ID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" rna_seq_gse_ids.txt)
 
 echo "Starting differential expression analysis for $GSE_ID"
 echo "Current working directory: $(pwd)"
