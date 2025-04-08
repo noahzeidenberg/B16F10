@@ -1097,6 +1097,199 @@ check_fastq_files <- function(gse_id) {
   return(FALSE)
 }
 
+# Function to verify that all SRA files have been downloaded and converted to FASTQ
+verify_downloads <- function(gse_id, sra_data) {
+  cat("=== Verifying downloads and conversions ===\n")
+  
+  base_dir <- get_base_dir()
+  gse_dir <- file.path(base_dir, gse_id)
+  
+  if (!dir.exists(gse_dir)) {
+    cat("GSE directory does not exist. Verification failed.\n")
+    return(FALSE)
+  }
+  
+  # Get all SRA IDs from the mapping
+  all_sra_ids <- unique(unlist(sra_data$srx_to_sra_mapping))
+  cat(sprintf("Expected SRA IDs: %s\n", paste(all_sra_ids, collapse = ", ")))
+  
+  # Track missing SRA files and FASTQ files
+  missing_sra_files <- c()
+  missing_fastq_files <- c()
+  corrupted_fastq_files <- c()
+  gsm_missing_fastq <- list()  # Track GSM IDs missing FASTQ files for specific SRA IDs
+  
+  # Check each sample directory
+  sample_dirs <- list.dirs(file.path(gse_dir, "samples"), recursive = FALSE)
+  if (length(sample_dirs) == 0) {
+    cat("No sample directories found. Verification failed.\n")
+    return(FALSE)
+  }
+  
+  # Create a mapping from SRA IDs to GSM IDs
+  sra_to_gsm_mapping <- list()
+  for (gsm_dir in sample_dirs) {
+    gsm_id <- basename(gsm_dir)
+    rds_file <- file.path(gsm_dir, paste0(gsm_id, ".rds"))
+    
+    if (file.exists(rds_file)) {
+      gsm <- readRDS(rds_file)
+      relations <- Meta(gsm)$relation
+      sra_link <- relations[grep("SRA:", relations)]
+      
+      if (length(sra_link) > 0) {
+        # Extract SRX ID from the SRA link
+        srx_id <- sub("SRA: https://www.ncbi.nlm.nih.gov/sra\\?term=", "", sra_link)
+        # Clean up the SRX ID
+        srx_id <- gsub("\\[.*\\]", "", srx_id)  # Remove any brackets and their contents
+        srx_id <- trimws(srx_id)  # Remove any whitespace
+        
+        # Get the SRA IDs for this SRX
+        if (!is.null(sra_data$srx_to_sra_mapping[[srx_id]])) {
+          for (sra_id in sra_data$srx_to_sra_mapping[[srx_id]]) {
+            if (is.null(sra_to_gsm_mapping[[sra_id]])) {
+              sra_to_gsm_mapping[[sra_id]] <- c()
+            }
+            sra_to_gsm_mapping[[sra_id]] <- c(sra_to_gsm_mapping[[sra_id]], gsm_id)
+          }
+        }
+      }
+    }
+  }
+  
+  # Check each SRA ID
+  for (sra_id in all_sra_ids) {
+    cat(sprintf("Checking SRA ID: %s\n", sra_id))
+    
+    # Find which GSM IDs are associated with this SRA ID
+    associated_gsm_ids <- sra_to_gsm_mapping[[sra_id]]
+    if (is.null(associated_gsm_ids) || length(associated_gsm_ids) == 0) {
+      cat(sprintf("Warning: No GSM IDs found for SRA ID %s\n", sra_id))
+      missing_sra_files <- c(missing_sra_files, sra_id)
+      next
+    }
+    
+    cat(sprintf("SRA %s is associated with GSM IDs: %s\n", 
+                sra_id, paste(associated_gsm_ids, collapse = ", ")))
+    
+    # Check if SRA file exists for at least one GSM
+    sra_file_exists <- FALSE
+    gsm_with_sra <- c()  # Track GSM IDs that have the SRA file
+    
+    for (gsm_id in associated_gsm_ids) {
+      gsm_dir <- file.path(gse_dir, "samples", gsm_id)
+      sra_dir <- file.path(gsm_dir, "SRA")
+      sra_file <- file.path(sra_dir, sra_id, paste0(sra_id, ".sra"))
+      
+      if (file.exists(sra_file) && file.info(sra_file)$size > 0) {
+        sra_file_exists <- TRUE
+        gsm_with_sra <- c(gsm_with_sra, gsm_id)
+        cat(sprintf("Found SRA file: %s (size: %.2f MB)\n", 
+                   sra_file, file.info(sra_file)$size/1024/1024))
+      }
+    }
+    
+    if (!sra_file_exists) {
+      cat(sprintf("SRA file not found for SRA ID: %s\n", sra_id))
+      missing_sra_files <- c(missing_sra_files, sra_id)
+    } else {
+      # Check if FASTQ files exist for each GSM that has the SRA file
+      for (gsm_id in gsm_with_sra) {
+        gsm_dir <- file.path(gse_dir, "samples", gsm_id)
+        fastq_dir <- file.path(gsm_dir, "SRA", "FASTQ")
+        
+        if (dir.exists(fastq_dir)) {
+          fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
+          if (length(fastq_files) > 0) {
+            cat(sprintf("Found %d FASTQ files for SRA %s in GSM %s\n", 
+                       length(fastq_files), sra_id, gsm_id))
+            
+            # Check if any FASTQ files are corrupted
+            for (fastq_file in fastq_files) {
+              # Try to read the first few lines of the file
+              cmd <- sprintf("zcat %s | head -n 4", fastq_file)
+              result <- system(cmd, intern = TRUE)
+              # Check if we got 4 lines (a complete FASTQ record)
+              if (length(result) != 4) {
+                cat(sprintf("Warning: FASTQ file appears to be corrupted: %s\n", fastq_file))
+                corrupted_fastq_files <- c(corrupted_fastq_files, fastq_file)
+              }
+            }
+          } else {
+            cat(sprintf("No FASTQ files found for SRA %s in GSM %s\n", sra_id, gsm_id))
+            if (is.null(gsm_missing_fastq[[sra_id]])) {
+              gsm_missing_fastq[[sra_id]] <- c()
+            }
+            gsm_missing_fastq[[sra_id]] <- c(gsm_missing_fastq[[sra_id]], gsm_id)
+            missing_fastq_files <- c(missing_fastq_files, sra_id)
+          }
+        } else {
+          cat(sprintf("FASTQ directory not found for GSM %s\n", gsm_id))
+          if (is.null(gsm_missing_fastq[[sra_id]])) {
+            gsm_missing_fastq[[sra_id]] <- c()
+          }
+          gsm_missing_fastq[[sra_id]] <- c(gsm_missing_fastq[[sra_id]], gsm_id)
+          missing_fastq_files <- c(missing_fastq_files, sra_id)
+        }
+      }
+    }
+    
+    # Also check if FASTQ files exist for any GSM (even if they don't have the SRA file)
+    # This is a less strict check but still useful
+    fastq_files_exist_anywhere <- FALSE
+    for (gsm_id in associated_gsm_ids) {
+      gsm_dir <- file.path(gse_dir, "samples", gsm_id)
+      fastq_dir <- file.path(gsm_dir, "SRA", "FASTQ")
+      
+      if (dir.exists(fastq_dir)) {
+        fastq_files <- list.files(fastq_dir, pattern = paste0(sra_id, ".*\\.fastq\\.gz$"), full.names = TRUE)
+        if (length(fastq_files) > 0) {
+          fastq_files_exist_anywhere <- TRUE
+          break
+        }
+      }
+    }
+    
+    if (!fastq_files_exist_anywhere && !sra_file_exists) {
+      cat(sprintf("FASTQ files not found for SRA ID: %s\n", sra_id))
+      missing_fastq_files <- c(missing_fastq_files, sra_id)
+    }
+  }
+  
+  # Report verification results
+  cat("\n=== Verification Results ===\n")
+  
+  if (length(missing_sra_files) == 0 && length(missing_fastq_files) == 0 && length(corrupted_fastq_files) == 0) {
+    cat("All SRA files have been downloaded and converted to FASTQ successfully.\n")
+    return(TRUE)
+  } else {
+    if (length(missing_sra_files) > 0) {
+      cat(sprintf("Missing SRA files (%d): %s\n", 
+                 length(missing_sra_files), paste(missing_sra_files, collapse = ", ")))
+    }
+    
+    if (length(missing_fastq_files) > 0) {
+      cat(sprintf("Missing FASTQ files for SRA IDs (%d): %s\n", 
+                 length(missing_fastq_files), paste(missing_fastq_files, collapse = ", ")))
+      
+      # Report which GSM IDs are missing FASTQ files for each SRA ID
+      for (sra_id in missing_fastq_files) {
+        if (!is.null(gsm_missing_fastq[[sra_id]]) && length(gsm_missing_fastq[[sra_id]]) > 0) {
+          cat(sprintf("  - SRA %s: Missing FASTQ files for GSM IDs: %s\n", 
+                     sra_id, paste(gsm_missing_fastq[[sra_id]], collapse = ", ")))
+        }
+      }
+    }
+    
+    if (length(corrupted_fastq_files) > 0) {
+      cat(sprintf("Corrupted FASTQ files (%d): %s\n", 
+                 length(corrupted_fastq_files), paste(basename(corrupted_fastq_files), collapse = ", ")))
+    }
+    
+    return(FALSE)
+  }
+}
+
 # Main function to download and process SRA files
 download_and_process_sra <- function(gse_id, api_key = NULL, threads = 4) {
   # Set up logging
@@ -1177,7 +1370,16 @@ download_and_process_sra <- function(gse_id, api_key = NULL, threads = 4) {
   cat(sprintf("Processed %d out of %d SRA IDs successfully\n", 
               success_count, length(all_sra_ids)), file = log_file, append = TRUE)
   
-  return(success_count == length(all_sra_ids))
+  # Verify downloads and conversions
+  cat("Verifying downloads and conversions...\n")
+  verification_result <- verify_downloads(gse_id, sra_data)
+  if (!verification_result) {
+    cat("Verification failed. Some files may be missing or corrupted.\n")
+  } else {
+    cat("Verification successful. All files have been downloaded and converted.\n")
+  }
+  
+  return(verification_result)
 }
 
 # Main workflow
@@ -1235,6 +1437,15 @@ main <- function(gse_id = NULL) {
     
     cat("Converting SRA to FASTQ...\n")
     convert_sra_to_fastq(gse_id, sra_data$sra_ids)
+    
+    # Verify downloads and conversions
+    cat("Verifying downloads and conversions...\n")
+    verification_result <- verify_downloads(gse_id, sra_data)
+    if (!verification_result) {
+      cat("Verification failed. Some files may be missing or corrupted.\n")
+    } else {
+      cat("Verification successful. All files have been downloaded and converted.\n")
+    }
     
     cat("Download and conversion complete!\n")
   }, error = function(e) {
