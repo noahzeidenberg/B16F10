@@ -8,7 +8,7 @@
 #SBATCH --job-name=normalization
 #SBATCH --output=logs/normalization/normalization_%A_%a.out
 #SBATCH --error=logs/normalization/normalization_%A_%a.err
-#SBATCH --array=1-1     # Will process up to 60 GSEs, 5 at a time.
+#SBATCH --array=1-60%5     # Will process up to 60 GSEs, 5 at a time.
 
 # Enable debugging
 set -x
@@ -37,8 +37,8 @@ mkdir -p $SUBMIT_DIR/results/normalization
 mkdir -p $SUBMIT_DIR/logs/normalization
 
 # Get the GSE ID for this array task
-# GSE_ID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" rna_seq_gse_ids.txt)
-GSE_ID=${1:-GSE90885}
+GSE_ID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" rna_seq_gse_ids.txt)
+#GSE_ID=${1:-GSE90885}
 echo "Processing GSE: $GSE_ID"
 
 # Run the R script for this specific GSE
