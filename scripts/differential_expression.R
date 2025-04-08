@@ -286,19 +286,16 @@ perform_de_analysis <- function(gse_id) {
     cat(sprintf("Filtering counts to %d samples with valid groups.\n", length(valid_samples)))
     counts <- counts[, valid_samples]
     
-    # Create a factor for the groups with explicit levels
-    # First, get all unique groups from the design matrix
-    all_groups <- unique(design_matrix$Group)
-    cat("All groups from design matrix:\n")
-    print(all_groups)
+    # Simplify group names by removing numbers
+    simplified_groups <- gsub("[0-9]", "", sample_to_group$Group)
     
-    # Create a factor with explicit levels
-    group_factor <- factor(sample_to_group$Group, levels = all_groups)
+    # Create a factor for the simplified groups
+    group_factor <- factor(simplified_groups)
     
     # Print the group factor for debugging
-    cat("Group factor:\n")
+    cat("Simplified group factor:\n")
     print(group_factor)
-    cat("Group factor levels:\n")
+    cat("Simplified group factor levels:\n")
     print(levels(group_factor))
   } else {
     cat("No valid samples found with matching GSM IDs in design matrix. Cannot proceed.\n")
@@ -325,9 +322,10 @@ perform_de_analysis <- function(gse_id) {
     y <- DGEList(counts = counts)
   }
   
-  # Filter low count genes
-  cat("Filtering low count genes...\n")
-  keep <- filterByExpr(y)
+  # Filter low count genes with more lenient criteria
+  cat("Filtering low count genes with lenient criteria...\n")
+  # Use more lenient filtering criteria
+  keep <- filterByExpr(y, min.count = 1, min.total.count = 2, large.n = 10, min.samples = 1)
   y <- y[keep, , keep.lib.sizes = FALSE]
   cat(sprintf("Kept %d genes out of %d\n", sum(keep), length(keep)))
   
@@ -379,20 +377,52 @@ perform_de_analysis <- function(gse_id) {
   cat(sprintf("Groups found: %s\n", paste(groups, collapse = ", ")))
   
   if (length(groups) > 1) {
-    # Create contrasts for each group compared to the first group (control)
-    control_group <- groups[1]  # Assuming the first group is the control
-    for (j in 2:length(groups)) {
-      contrast_name <- paste0(groups[j], "_vs_", control_group)
+    # Check if we have control and treatment groups
+    if ("control" %in% groups && "treatment" %in% groups) {
+      # Create contrast for control vs treatment
+      contrast_name <- "treatment_vs_control"
       cat(sprintf("Creating contrast: %s\n", contrast_name))
       
       # Create the contrast using makeContrasts
-      contrast_formula <- paste0(groups[j], " - ", control_group)
+      contrast_formula <- "treatment - control"
       cat(sprintf("Contrast formula: %s\n", contrast_formula))
       
       contrasts[[contrast_name]] <- makeContrasts(
         contrast_formula,
         levels = design
       )
+      
+      # Check if we have unknown groups
+      if ("unknown" %in% groups) {
+        # Create contrast for control vs treatment+unknown
+        contrast_name <- "treatment_unknown_vs_control"
+        cat(sprintf("Creating contrast: %s\n", contrast_name))
+        
+        # Create the contrast using makeContrasts
+        contrast_formula <- "(treatment + unknown) - control"
+        cat(sprintf("Contrast formula: %s\n", contrast_formula))
+        
+        contrasts[[contrast_name]] <- makeContrasts(
+          contrast_formula,
+          levels = design
+        )
+      }
+    } else {
+      # If we don't have control and treatment groups, create contrasts for each group compared to the first group
+      control_group <- groups[1]  # Assuming the first group is the control
+      for (j in 2:length(groups)) {
+        contrast_name <- paste0(groups[j], "_vs_", control_group)
+        cat(sprintf("Creating contrast: %s\n", contrast_name))
+        
+        # Create the contrast using makeContrasts
+        contrast_formula <- paste0(groups[j], " - ", control_group)
+        cat(sprintf("Contrast formula: %s\n", contrast_formula))
+        
+        contrasts[[contrast_name]] <- makeContrasts(
+          contrast_formula,
+          levels = design
+        )
+      }
     }
   } else {
     cat("Only one group found in the design matrix. Cannot create contrasts.\n")
