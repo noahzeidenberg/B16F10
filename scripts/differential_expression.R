@@ -468,35 +468,103 @@ perform_de_analysis <- function(gse_id) {
   control_groups <- groups[grep("control", groups, ignore.case = TRUE)]
   treatment_groups <- groups[grep("treatment", groups, ignore.case = TRUE)]
   
+  cat("DEBUG: Control groups:", paste(control_groups, collapse=", "), "\n")
+  cat("DEBUG: Treatment groups:", paste(treatment_groups, collapse=", "), "\n")
+  
   if (length(control_groups) > 0 && length(treatment_groups) > 0) {
     # Use the first control group as the reference
     control_group <- control_groups[1]
     cat(sprintf("Using %s as the control group\n", control_group))
     
     # Create contrasts for each treatment group compared to the control group
-    for (i in 1:length(treatment_groups)) {
-      treatment_group <- treatment_groups[i]
-      contrast_name <- paste0(treatment_group, "_vs_", control_group)
+    cat("DEBUG: Starting loop through treatment groups\n")
+    
+    # Create contrast for treatment1 vs control1
+    if ("treatment1" %in% treatment_groups) {
+      contrast_name <- "treatment1_vs_control1"
       cat(sprintf("Creating contrast: %s\n", contrast_name))
       
-      # Create the contrast using makeContrasts
-      contrasts[[contrast_name]] <- makeContrasts(
-        paste0(treatment_group, " - ", control_group),
-        levels = design
-      )
+      tryCatch({
+        contrasts[[contrast_name]] <- makeContrasts(
+          treatment1 - control1,
+          levels = design
+        )
+        cat(sprintf("DEBUG: Successfully created contrast for %s\n", contrast_name))
+      }, error = function(e) {
+        cat(sprintf("DEBUG: Error creating contrast: %s\n", e$message))
+      })
+    }
+    
+    # Create contrast for treatment2 vs control1
+    if ("treatment2" %in% treatment_groups) {
+      contrast_name <- "treatment2_vs_control1"
+      cat(sprintf("Creating contrast: %s\n", contrast_name))
+      
+      tryCatch({
+        contrasts[[contrast_name]] <- makeContrasts(
+          treatment2 - control1,
+          levels = design
+        )
+        cat(sprintf("DEBUG: Successfully created contrast for %s\n", contrast_name))
+      }, error = function(e) {
+        cat(sprintf("DEBUG: Error creating contrast: %s\n", e$message))
+      })
+    }
+    
+    # Create contrast for treatment3 vs control1
+    if ("treatment3" %in% treatment_groups) {
+      contrast_name <- "treatment3_vs_control1"
+      cat(sprintf("Creating contrast: %s\n", contrast_name))
+      
+      tryCatch({
+        contrasts[[contrast_name]] <- makeContrasts(
+          treatment3 - control1,
+          levels = design
+        )
+        cat(sprintf("DEBUG: Successfully created contrast for %s\n", contrast_name))
+      }, error = function(e) {
+        cat(sprintf("DEBUG: Error creating contrast: %s\n", e$message))
+      })
+    }
+    
+    # Create contrast for treatment4 vs control1
+    if ("treatment4" %in% treatment_groups) {
+      contrast_name <- "treatment4_vs_control1"
+      cat(sprintf("Creating contrast: %s\n", contrast_name))
+      
+      tryCatch({
+        contrasts[[contrast_name]] <- makeContrasts(
+          treatment4 - control1,
+          levels = design
+        )
+        cat(sprintf("DEBUG: Successfully created contrast for %s\n", contrast_name))
+      }, error = function(e) {
+        cat(sprintf("DEBUG: Error creating contrast: %s\n", e$message))
+      })
     }
   } else {
     # If we don't have control and treatment groups, create contrasts for each group compared to the first group
     control_group <- groups[1]  # Assuming the first group is the control
+    cat(sprintf("DEBUG: No control/treatment groups found. Using %s as control\n", control_group))
+    
+    # Create contrasts for each group compared to the control group
     for (j in 2:length(groups)) {
       contrast_name <- paste0(groups[j], "_vs_", control_group)
       cat(sprintf("Creating contrast: %s\n", contrast_name))
       
       # Create the contrast using makeContrasts
-      contrasts[[contrast_name]] <- makeContrasts(
-        paste0(groups[j], " - ", control_group),
-        levels = design
-      )
+      contrast_formula <- paste0(groups[j], " - ", control_group)
+      cat(sprintf("DEBUG: Contrast formula: %s\n", contrast_formula))
+      
+      tryCatch({
+        contrasts[[contrast_name]] <- makeContrasts(
+          contrast_formula,
+          levels = design
+        )
+        cat(sprintf("DEBUG: Successfully created contrast for %s\n", contrast_name))
+      }, error = function(e) {
+        cat(sprintf("DEBUG: Error creating contrast: %s\n", e$message))
+      })
     }
   }
   
