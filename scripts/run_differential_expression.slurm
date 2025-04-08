@@ -37,6 +37,9 @@ else
   echo "GSE directory does not exist"
 fi
 
+# Create output directory for logs if it doesn't exist
+mkdir -p logs/differential_expression
+
 # Run the R script
 echo "Running differential_expression.R for $GSE_ID"
 Rscript scripts/differential_expression.R $GSE_ID
@@ -44,6 +47,13 @@ Rscript scripts/differential_expression.R $GSE_ID
 # Check if the script ran successfully
 if [ $? -eq 0 ]; then
   echo "Differential expression analysis completed successfully for $GSE_ID"
+  
+  # Check if results were generated
+  if [ -f "$GSE_ID/results/differential_expression/${GSE_ID}_de_results.rds" ]; then
+    echo "Results file created successfully"
+  else
+    echo "Warning: Results file not found. Analysis may have completed but no results were generated."
+  fi
 else
   echo "Differential expression analysis failed for $GSE_ID"
   exit 1

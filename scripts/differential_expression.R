@@ -310,24 +310,32 @@ perform_de_analysis <- function(gse_id) {
   # Create DGEList object
   cat("Creating DGEList object...\n")
   
-  # Check for negative values in counts
-  if (any(counts < 0)) {
-    cat("Warning: Negative values detected in counts. This is expected for log-transformed data.\n")
-    cat("Converting to raw counts before creating DGEList...\n")
+  # Based on the normalization approach in normalize_counts.R,
+  # the counts are log2-transformed CPM values with gene length correction
+  cat("Converting log2-transformed CPM values back to raw counts...\n")
+  
+  # Instead of trying to convert back to raw counts (which can lead to extremely large values),
+  # we'll use a more direct approach for edgeR analysis
+  
+  # First, check if we have raw counts available in the normalized data
+  if ("raw_counts" %in% names(normalized_data)) {
+    cat("Using raw counts from normalized data...\n")
+    raw_counts <- normalized_data$raw_counts
     
-    # Print summary of negative values
-    cat("Summary of negative values:\n")
-    print(summary(as.vector(counts[counts < 0])))
+    # Print summary of raw counts
+    cat("Raw counts summary:\n")
+    print(summary(as.vector(raw_counts)))
     
-    # Based on the normalization approach in normalize_counts.R,
-    # the counts are log2-transformed CPM values with gene length correction
-    cat("Converting log2-transformed CPM values back to raw counts...\n")
+    # Create DGEList with raw counts
+    y <- DGEList(counts = raw_counts)
+  } else {
+    # If raw counts are not available, we'll use a more conservative approach
+    cat("Raw counts not available. Using a more conservative approach...\n")
     
     # First, convert from log2(CPM/kb) to CPM/kb
     cpm_kb <- 2^counts
     
     # Then, multiply by gene length (in kb) to get CPM
-    # We need to get gene lengths from the normalized data
     if ("gene_lengths" %in% names(normalized_data)) {
       gene_lengths_kb <- normalized_data$gene_lengths$length / 1000
       
@@ -336,29 +344,19 @@ perform_de_analysis <- function(gse_id) {
         # Convert from CPM/kb to CPM
         cpm <- sweep(cpm_kb, 1, gene_lengths_kb, "*")
         
-        # Convert from CPM to raw counts
-        # CPM = (counts * 1e6) / lib_size
-        # Therefore, counts = (CPM * lib_size) / 1e6
-        # We'll use a reasonable library size estimate
-        lib_size <- 1e7  # Typical library size
-        raw_counts <- (cpm * lib_size) / 1e6
+        # Instead of converting to raw counts, we'll use the CPM values directly
+        # This is a reasonable approach for edgeR when we don't have raw counts
+        cat("Using CPM values directly for edgeR analysis...\n")
         
-        # Print summary of converted counts
-        cat("Converted counts summary:\n")
-        print(summary(as.vector(raw_counts)))
+        # Print summary of CPM values
+        cat("CPM values summary:\n")
+        print(summary(as.vector(cpm)))
         
-        # Round to integers
-        raw_counts <- round(raw_counts)
+        # Create DGEList with CPM values
+        y <- DGEList(counts = cpm)
         
-        # Ensure non-negative values
-        raw_counts[raw_counts < 0] <- 0
-        
-        # Print summary of final raw counts
-        cat("Final raw counts summary:\n")
-        print(summary(as.vector(raw_counts)))
-        
-        # Create DGEList with raw counts
-        y <- DGEList(counts = raw_counts)
+        # Set the library sizes to 1e6 to indicate these are CPM values
+        y$samples$lib.size <- rep(1e6, ncol(y))
       } else {
         cat("Error: Gene lengths do not match counts matrix dimensions\n")
         cat(sprintf("Gene lengths: %d, Counts rows: %d\n", length(gene_lengths_kb), nrow(counts)))
@@ -368,25 +366,90 @@ perform_de_analysis <- function(gse_id) {
       cat("Error: Gene lengths not found in normalized data\n")
       return(FALSE)
     }
-  } else {
-    # Create DGEList with original counts
-    y <- DGEList(counts = counts)
   }
   
-  # Filter low count genes with very lenient criteria
-  cat("Filtering low count genes with very lenient criteria...\n")
-  # Use very lenient filtering criteria to keep more genes
-  keep <- filterByExpr(y, min.count = 0, min.total.count = 0, large.n = 10, min.samples = 1)
-  y <- y[keep, , keep.lib.sizes = FALSE]
-  cat(sprintf("Kept %d genes out of %d\n", sum(keep), length(keep)))
+  # Filter low count genes with more stringent criteria
+  cat("Filtering low count genes with more stringent criteria...\n")
   
-  # If we're still keeping too few genes, try an alternative approach
-  if (sum(keep) < 1000) {
-    cat("Keeping too few genes with filterByExpr. Using alternative approach...\n")
-    # Keep genes with at least one count in at least one sample
-    keep <- rowSums(y$counts > 0) >= 1
+  # First, check if we're using raw counts or CPM values
+  if (all(y$samples$lib.size == 1e6)) {
+    # We're using CPM values
+    cat("Using CPM-specific filtering criteria...\n")
+    
+    # For CPM values, we'll use a minimum CPM threshold
+    # Keep genes with at least 1 CPM in at least 2 samples
+    min_cpm <- 1
+    min_samples <- 2
+    
+    # Calculate CPM values (they should already be in CPM format)
+    cpm_values <- y$counts
+    
+    # Filter based on CPM threshold
+    keep <- rowSums(cpm_values >= min_cpm) >= min_samples
     y <- y[keep, , keep.lib.sizes = FALSE]
-    cat(sprintf("Kept %d genes out of %d using alternative approach\n", sum(keep), length(keep)))
+    cat(sprintf("Kept %d genes out of %d (CPM >= %g in at least %d samples)\n", 
+                sum(keep), length(keep), min_cpm, min_samples))
+  } else {
+    # We're using raw counts
+    cat("Using raw count-specific filtering criteria...\n")
+    
+    # For raw counts, we'll use edgeR's filterByExpr with more stringent parameters
+    # Keep genes with at least 10 counts in at least 2 samples
+    min_count <- 10
+    min_samples <- 2
+    
+    # Use filterByExpr with more stringent criteria
+    keep <- filterByExpr(y, min.count = min_count, min.total.count = 0, 
+                         large.n = 10, min.samples = min_samples)
+    y <- y[keep, , keep.lib.sizes = FALSE]
+    cat(sprintf("Kept %d genes out of %d (count >= %d in at least %d samples)\n", 
+                sum(keep), length(keep), min_count, min_samples))
+  }
+  
+  # If we're still keeping too many genes, apply additional filtering
+  if (sum(keep) > 20000) {
+    cat("Still keeping too many genes. Applying additional filtering...\n")
+    
+    # Calculate coefficient of variation (CV) for each gene
+    # Genes with high CV are more likely to be differentially expressed
+    if (all(y$samples$lib.size == 1e6)) {
+      # For CPM values
+      cpm_values <- y$counts
+      cv <- apply(cpm_values, 1, function(x) sd(x)/mean(x))
+    } else {
+      # For raw counts, convert to log-CPM first
+      log_cpm <- cpm(y$counts, log = TRUE)
+      cv <- apply(log_cpm, 1, function(x) sd(x)/mean(x))
+    }
+    
+    # Keep genes with CV above the median
+    cv_threshold <- median(cv, na.rm = TRUE)
+    keep_cv <- cv >= cv_threshold
+    y <- y[keep_cv, , keep.lib.sizes = FALSE]
+    cat(sprintf("After CV filtering: Kept %d genes out of %d (CV >= %g)\n", 
+                sum(keep_cv), sum(keep), cv_threshold))
+  }
+  
+  # If we're still keeping too few genes, try a more lenient approach
+  if (sum(keep) < 1000) {
+    cat("Keeping too few genes. Using more lenient filtering criteria...\n")
+    
+    if (all(y$samples$lib.size == 1e6)) {
+      # For CPM values, use a lower threshold
+      min_cpm <- 0.5
+      min_samples <- 1
+      cpm_values <- y$counts
+      keep <- rowSums(cpm_values >= min_cpm) >= min_samples
+    } else {
+      # For raw counts, use a lower count threshold
+      min_count <- 5
+      min_samples <- 1
+      keep <- filterByExpr(y, min.count = min_count, min.total.count = 0, 
+                           large.n = 10, min.samples = min_samples)
+    }
+    
+    y <- y[keep, , keep.lib.sizes = FALSE]
+    cat(sprintf("With lenient criteria: Kept %d genes out of %d\n", sum(keep), length(keep)))
   }
   
   # Create design matrix for edgeR
@@ -641,14 +704,15 @@ perform_de_analysis <- function(gse_id) {
       
       # Scale the log-transformed data
       tryCatch({
-        de_expr_scaled <- t(scale(t(de_expr_log)))
+        # Replace any infinite values with NA before scaling
+        de_expr_log[is.infinite(de_expr_log)] <- NA
+        
+        # Scale the data, handling NA values
+        de_expr_scaled <- t(scale(t(de_expr_log), center = TRUE, scale = TRUE))
         cat("Scaled expression data summary:\n")
         print(summary(as.vector(de_expr_scaled)))
         
-        # Remove any remaining infinite values
-        de_expr_scaled[is.infinite(de_expr_scaled)] <- NA
-        
-        # Calculate row means for sorting
+        # Calculate row means for sorting, ignoring NA values
         row_means <- rowMeans(de_expr_scaled, na.rm = TRUE)
         # Sort rows by mean expression
         de_expr_scaled <- de_expr_scaled[order(row_means, decreasing = TRUE), ]
@@ -677,6 +741,28 @@ perform_de_analysis <- function(gse_id) {
         cat("Number of samples:", ncol(de_expr_scaled), "\n")
         cat("Number of NA values:", sum(is.na(de_expr_scaled)), "\n")
         cat("Number of infinite values:", sum(is.infinite(de_expr_scaled)), "\n")
+        
+        # Try an alternative approach for heatmap creation
+        cat("Trying alternative approach for heatmap creation...\n")
+        tryCatch({
+          # Replace NA values with 0 for visualization purposes
+          de_expr_scaled_alt <- de_expr_scaled
+          de_expr_scaled_alt[is.na(de_expr_scaled_alt)] <- 0
+          
+          # Create heatmap with alternative approach
+          pdf(file.path(output_dir, paste0(gse_id, "_de_heatmap_alt.pdf")))
+          pheatmap(de_expr_scaled_alt,
+                  main = "Differentially Expressed Genes (NA values set to 0)",
+                  scale = "none",
+                  clustering_method = "ward.D2",
+                  show_rownames = FALSE,
+                  annotation_col = sample_annotation)
+          dev.off()
+          cat("Created alternative heatmap with NA values set to 0\n")
+        }, error = function(e2) {
+          cat(sprintf("Error during alternative heatmap creation: %s\n", e2$message))
+        })
+        
         return(FALSE)
       })
     } else {
