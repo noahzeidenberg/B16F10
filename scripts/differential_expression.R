@@ -310,10 +310,29 @@ perform_de_analysis <- function(gse_id) {
     cat("Warning: Negative values detected in counts. This is expected for log-transformed data.\n")
     cat("Converting to raw counts before creating DGEList...\n")
     
+    # Print summary of negative values
+    cat("Summary of negative values:\n")
+    print(summary(as.vector(counts[counts < 0])))
+    
     # Convert log-transformed counts back to raw counts
     # For log-transformed data, we need to reverse the transformation
     # If the data was log-transformed with log=TRUE in cpm(), we need to use exp()
     raw_counts <- exp(counts)
+    
+    # Print summary of raw counts
+    cat("Summary of raw counts after conversion:\n")
+    print(summary(as.vector(raw_counts)))
+    
+    # Check for extreme values
+    if (any(raw_counts > 1e6)) {
+      cat("Warning: Extreme values detected in raw counts. This might cause issues.\n")
+      cat("Summary of extreme values:\n")
+      print(summary(as.vector(raw_counts[raw_counts > 1e6])))
+      
+      # Cap extreme values
+      raw_counts[raw_counts > 1e6] <- 1e6
+      cat("Capped extreme values to 1e6.\n")
+    }
     
     # Create DGEList with raw counts
     y <- DGEList(counts = raw_counts)
@@ -322,12 +341,21 @@ perform_de_analysis <- function(gse_id) {
     y <- DGEList(counts = counts)
   }
   
-  # Filter low count genes with more lenient criteria
-  cat("Filtering low count genes with lenient criteria...\n")
-  # Use more lenient filtering criteria
-  keep <- filterByExpr(y, min.count = 1, min.total.count = 2, large.n = 10, min.samples = 1)
+  # Filter low count genes with very lenient criteria
+  cat("Filtering low count genes with very lenient criteria...\n")
+  # Use very lenient filtering criteria to keep more genes
+  keep <- filterByExpr(y, min.count = 0, min.total.count = 0, large.n = 10, min.samples = 1)
   y <- y[keep, , keep.lib.sizes = FALSE]
   cat(sprintf("Kept %d genes out of %d\n", sum(keep), length(keep)))
+  
+  # If we're still keeping too few genes, try an alternative approach
+  if (sum(keep) < 1000) {
+    cat("Keeping too few genes with filterByExpr. Using alternative approach...\n")
+    # Keep genes with at least one count in at least one sample
+    keep <- rowSums(y$counts > 0) >= 1
+    y <- y[keep, , keep.lib.sizes = FALSE]
+    cat(sprintf("Kept %d genes out of %d using alternative approach\n", sum(keep), length(keep)))
+  }
   
   # Create design matrix for edgeR
   cat("Creating design matrix for edgeR...\n")
@@ -364,9 +392,37 @@ perform_de_analysis <- function(gse_id) {
   plotBCV(y)
   dev.off()
   
-  # Fit model
+  # Fit model with error handling
   cat("Fitting model...\n")
-  fit <- glmQLFit(y, design)
+  tryCatch({
+    # Check if we have enough samples per group
+    group_counts <- table(group_factor)
+    cat("Sample counts per group:\n")
+    print(group_counts)
+    
+    # Check if we have at least one sample in each group
+    if (min(group_counts) < 1) {
+      cat("Error: Not enough samples in each group. Cannot fit model.\n")
+      return(FALSE)
+    }
+    
+    # Check if we have enough genes
+    if (nrow(y) < 10) {
+      cat("Error: Not enough genes after filtering. Cannot fit model.\n")
+      return(FALSE)
+    }
+    
+    # Fit the model
+    fit <- glmQLFit(y, design)
+    cat("Model fitting successful.\n")
+  }, error = function(e) {
+    cat(sprintf("Error during model fitting: %s\n", e$message))
+    cat("Design matrix structure:\n")
+    str(design)
+    cat("DGEList structure:\n")
+    str(y)
+    return(FALSE)
+  })
   
   # Create contrasts for all pairwise comparisons
   cat("Creating contrasts...\n")
