@@ -8,7 +8,7 @@
 #SBATCH --job-name=normalization
 #SBATCH --output=logs/normalization/normalization_%A_%a.out
 #SBATCH --error=logs/normalization/normalization_%A_%a.err
-#SBATCH --array=1-100%5     # Will process up to 100 GSEs, 5 at a time. Adjust the number based on your actual GSE count
+#SBATCH --array=1-60%5     # Will process up to 60 GSEs, 5 at a time.
 
 # Enable debugging
 set -x
