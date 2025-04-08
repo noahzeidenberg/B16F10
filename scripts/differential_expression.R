@@ -286,6 +286,10 @@ perform_de_analysis <- function(gse_id) {
     cat(sprintf("Filtering counts to %d samples with valid groups.\n", length(valid_samples)))
     counts <- counts[, valid_samples]
     
+    # Print the original group assignments for debugging
+    cat("Original group assignments:\n")
+    print(sample_to_group$Group)
+    
     # Simplify group names by removing numbers
     simplified_groups <- gsub("[0-9]", "", sample_to_group$Group)
     
@@ -297,6 +301,10 @@ perform_de_analysis <- function(gse_id) {
     print(group_factor)
     cat("Simplified group factor levels:\n")
     print(levels(group_factor))
+    
+    # Print a table of the group assignments
+    cat("Group assignments table:\n")
+    print(table(group_factor))
   } else {
     cat("No valid samples found with matching GSM IDs in design matrix. Cannot proceed.\n")
     return(FALSE)
@@ -315,28 +323,54 @@ perform_de_analysis <- function(gse_id) {
     print(summary(as.vector(counts[counts < 0])))
     
     # Based on the normalization approach in normalize_counts.R,
-    # the counts are log2-transformed CPM values
-    cat("Converting log2(CPM) values back to CPM...\n")
+    # the counts are log2-transformed CPM values with gene length correction
+    cat("Converting log2-transformed CPM values back to raw counts...\n")
     
-    # Convert from log2(CPM) to CPM
-    raw_counts <- 2^counts-2 # prior.count = 2 by default in edgeR
+    # First, convert from log2(CPM/kb) to CPM/kb
+    cpm_kb <- 2^counts
     
-    # Print summary of converted counts
-    cat("Converted counts summary:\n")
-    print(summary(as.vector(raw_counts)))
-    
-    # Round to integers
-    raw_counts <- round(raw_counts)
-    
-    # Ensure non-negative values
-    raw_counts[raw_counts < 0] <- 0
-    
-    # Print summary of final raw counts
-    cat("Final raw counts summary:\n")
-    print(summary(as.vector(raw_counts)))
-    
-    # Create DGEList with raw counts
-    y <- DGEList(counts = raw_counts)
+    # Then, multiply by gene length (in kb) to get CPM
+    # We need to get gene lengths from the normalized data
+    if ("gene_lengths" %in% names(normalized_data)) {
+      gene_lengths_kb <- normalized_data$gene_lengths$length / 1000
+      
+      # Ensure gene lengths match the counts matrix
+      if (length(gene_lengths_kb) == nrow(counts)) {
+        # Convert from CPM/kb to CPM
+        cpm <- sweep(cpm_kb, 1, gene_lengths_kb, "*")
+        
+        # Convert from CPM to raw counts
+        # CPM = (counts * 1e6) / lib_size
+        # Therefore, counts = (CPM * lib_size) / 1e6
+        # We'll use a reasonable library size estimate
+        lib_size <- 1e7  # Typical library size
+        raw_counts <- (cpm * lib_size) / 1e6
+        
+        # Print summary of converted counts
+        cat("Converted counts summary:\n")
+        print(summary(as.vector(raw_counts)))
+        
+        # Round to integers
+        raw_counts <- round(raw_counts)
+        
+        # Ensure non-negative values
+        raw_counts[raw_counts < 0] <- 0
+        
+        # Print summary of final raw counts
+        cat("Final raw counts summary:\n")
+        print(summary(as.vector(raw_counts)))
+        
+        # Create DGEList with raw counts
+        y <- DGEList(counts = raw_counts)
+      } else {
+        cat("Error: Gene lengths do not match counts matrix dimensions\n")
+        cat(sprintf("Gene lengths: %d, Counts rows: %d\n", length(gene_lengths_kb), nrow(counts)))
+        return(FALSE)
+      }
+    } else {
+      cat("Error: Gene lengths not found in normalized data\n")
+      return(FALSE)
+    }
   } else {
     # Create DGEList with original counts
     y <- DGEList(counts = counts)
