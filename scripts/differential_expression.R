@@ -440,11 +440,8 @@ perform_de_analysis <- function(gse_id) {
       cat(sprintf("Creating contrast: %s\n", contrast_name))
       
       # Create the contrast using makeContrasts
-      contrast_formula <- "treatment - control"
-      cat(sprintf("Contrast formula: %s\n", contrast_formula))
-      
       contrasts[[contrast_name]] <- makeContrasts(
-        contrast_formula,
+        treatment - control,
         levels = design
       )
       
@@ -455,11 +452,8 @@ perform_de_analysis <- function(gse_id) {
         cat(sprintf("Creating contrast: %s\n", contrast_name))
         
         # Create the contrast using makeContrasts
-        contrast_formula <- "(treatment + unknown) - control"
-        cat(sprintf("Contrast formula: %s\n", contrast_formula))
-        
         contrasts[[contrast_name]] <- makeContrasts(
-          contrast_formula,
+          (treatment + unknown) - control,
           levels = design
         )
       }
@@ -471,11 +465,8 @@ perform_de_analysis <- function(gse_id) {
         cat(sprintf("Creating contrast: %s\n", contrast_name))
         
         # Create the contrast using makeContrasts
-        contrast_formula <- paste0(groups[j], " - ", control_group)
-        cat(sprintf("Contrast formula: %s\n", contrast_formula))
-        
         contrasts[[contrast_name]] <- makeContrasts(
-          contrast_formula,
+          paste0(groups[j], " - ", control_group),
           levels = design
         )
       }
