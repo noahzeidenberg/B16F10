@@ -18,7 +18,7 @@ cd ~/scratch/B16F10
 source ~/scratch/B16F10/.venv/bin/activate
 
 # Get GSE ID from command line or use default
-GSE_ID=${1:-GSE254073}
+GSE_ID=${1:-GSE287957}
 
 echo "Starting differential expression analysis for $GSE_ID"
 echo "Current working directory: $(pwd)"
