@@ -187,11 +187,11 @@ perform_de_analysis <- function(gse_id) {
   }
   
   # Create a mapping between SRA IDs and GEO accession IDs
-  # This is a simplified approach - in a real scenario, you might need a more robust mapping
   cat("Creating mapping between SRA IDs and GEO accession IDs...\n")
   
   # Extract SRA IDs from the sample names (assuming format like SRR12345678_Aligned.sortedByCoord.out.bam)
   sra_ids <- gsub("_Aligned.sortedByCoord.out.bam", "", samples)
+  sra_ids <- gsub(paste0(gse_id, "_"), "", sra_ids)
   cat("Extracted SRA IDs:\n")
   cat(paste(sra_ids, collapse = ", "), "\n")
   
@@ -216,6 +216,43 @@ perform_de_analysis <- function(gse_id) {
         
         if (nrow(design_matrix) > 0) {
           cat(sprintf("Filtered design matrix to %d samples.\n", nrow(design_matrix)))
+          
+          # Create a mapping from SRA IDs to groups
+          sra_to_group <- data.frame(
+            SRA_ID = character(),
+            Group = character(),
+            stringsAsFactors = FALSE
+          )
+          
+          for (i in 1:nrow(mapping)) {
+            geo_id <- mapping$GEO_ID[i]
+            sra_id <- mapping$SRA_ID[i]
+            group <- design_matrix$Group[design_matrix$Sample_geo_accession == geo_id]
+            
+            if (length(group) > 0) {
+              sra_to_group <- rbind(sra_to_group, data.frame(
+                SRA_ID = sra_id,
+                Group = group,
+                stringsAsFactors = FALSE
+              ))
+            }
+          }
+          
+          # Filter counts to only include samples with valid groups
+          valid_sra_ids <- sra_to_group$SRA_ID
+          valid_samples <- paste0(gse_id, "_", valid_sra_ids, "_Aligned.sortedByCoord.out.bam")
+          valid_samples <- valid_samples[valid_samples %in% samples]
+          
+          if (length(valid_samples) > 0) {
+            cat(sprintf("Filtering counts to %d samples with valid groups.\n", length(valid_samples)))
+            counts <- counts[, valid_samples]
+            
+            # Create a factor for the groups
+            group_factor <- factor(sra_to_group$Group)
+          } else {
+            cat("No valid samples found after filtering. Cannot proceed.\n")
+            return(FALSE)
+          }
         } else {
           cat("No matching GEO IDs found in design matrix. Cannot proceed.\n")
           return(FALSE)
@@ -238,6 +275,9 @@ perform_de_analysis <- function(gse_id) {
                   ncol(counts), nrow(design_matrix)))
       return(FALSE)
     }
+    
+    # Create a factor from group information
+    group_factor <- factor(design_matrix$Group)
   }
   
   # Create DGEList object
@@ -252,9 +292,6 @@ perform_de_analysis <- function(gse_id) {
   
   # Create design matrix for edgeR
   cat("Creating design matrix for edgeR...\n")
-  
-  # Create factor from group information
-  group_factor <- factor(design_matrix$Group)
   
   # Create design matrix
   design <- model.matrix(~0 + group_factor)
