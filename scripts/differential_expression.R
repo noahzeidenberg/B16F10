@@ -474,7 +474,8 @@ perform_de_analysis <- function(gse_id) {
     cat(sprintf("Using %s as the control group\n", control_group))
     
     # Create contrasts for each treatment group compared to the control group
-    for (treatment_group in treatment_groups) {
+    for (i in 1:length(treatment_groups)) {
+      treatment_group <- treatment_groups[i]
       contrast_name <- paste0(treatment_group, "_vs_", control_group)
       cat(sprintf("Creating contrast: %s\n", contrast_name))
       
