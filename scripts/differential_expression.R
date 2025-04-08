@@ -314,25 +314,26 @@ perform_de_analysis <- function(gse_id) {
     cat("Summary of negative values:\n")
     print(summary(as.vector(counts[counts < 0])))
     
-    # Convert log-transformed counts back to raw counts
-    # For log-transformed data, we need to reverse the transformation
-    # If the data was log-transformed with log=TRUE in cpm(), we need to use exp()
-    raw_counts <- exp(counts)
+    # Based on the normalization approach in normalize_counts.R,
+    # the counts are log2-transformed CPM values
+    cat("Converting log2(CPM) values back to CPM...\n")
     
-    # Print summary of raw counts
-    cat("Summary of raw counts after conversion:\n")
+    # Convert from log2(CPM) to CPM
+    raw_counts <- 2^counts
+    
+    # Print summary of converted counts
+    cat("Converted counts summary:\n")
     print(summary(as.vector(raw_counts)))
     
-    # Check for extreme values
-    if (any(raw_counts > 1e6)) {
-      cat("Warning: Extreme values detected in raw counts. This might cause issues.\n")
-      cat("Summary of extreme values:\n")
-      print(summary(as.vector(raw_counts[raw_counts > 1e6])))
-      
-      # Cap extreme values
-      raw_counts[raw_counts > 1e6] <- 1e6
-      cat("Capped extreme values to 1e6.\n")
-    }
+    # Round to integers
+    raw_counts <- round(raw_counts)
+    
+    # Ensure non-negative values
+    raw_counts[raw_counts < 0] <- 0
+    
+    # Print summary of final raw counts
+    cat("Final raw counts summary:\n")
+    print(summary(as.vector(raw_counts)))
     
     # Create DGEList with raw counts
     y <- DGEList(counts = raw_counts)
