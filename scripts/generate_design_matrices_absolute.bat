@@ -101,7 +101,7 @@ for %%f in ("%SAMPLE_DIR%\*_sample_info.txt") do (
     
     :: Extract the content from the JSON response using PowerShell
     echo Extracting content from response...
-    powershell -Command "$response = Get-Content '%OUTPUT_DIR%\!gse_id!_response.json' -Raw | ConvertFrom-Json; $content = $response.choices[0].message.content; $asciiContent = [regex]::Replace($content, '[^\x00-\x7F]+', ''); $asciiContent | Out-File -Encoding utf8 '%OUTPUT_DIR%\!gse_id!_group_assignments.txt'"
+    powershell -Command "$response = Get-Content '%OUTPUT_DIR%\!gse_id!_response.json' -Raw | ConvertFrom-Json; $response.choices[0].message.content | Out-File -Encoding utf8 '%OUTPUT_DIR%\!gse_id!_group_assignments.txt'"
     
     :: Copy to design matrix file
     if exist "%OUTPUT_DIR%\!gse_id!_group_assignments.txt" (

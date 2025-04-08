@@ -487,7 +487,7 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       corrected_counts <- ComBat_seq(counts = counts_matrix,
                                     batch = batch_factor,
                                     group = NULL,
-                                    mod = mod)
+                                    covar_mod = mod)
       
       # Print a sample of the raw and corrected counts for comparison
       cat("Sample comparison of raw vs. corrected counts (first 5 genes, first 5 samples):\n")
@@ -527,7 +527,7 @@ perform_batch_correction <- function(counts, batch_info, output_dir) {
       corrected_counts <- ComBat_seq(counts = counts_matrix,
                                     batch = batch_factor,
                                     group = NULL,
-                                    mod = simple_mod)
+                                    covar_mod = simple_mod)
       
       # Check again if correction made any changes
       if (identical(as.matrix(counts), corrected_counts)) {
