@@ -8,7 +8,7 @@
 #SBATCH --job-name=download_rnaseq
 #SBATCH --output=logs/download_rnaseq/download_rnaseq_%A_%a.out
 #SBATCH --error=logs/download_rnaseq/download_rnaseq_%A_%a.err
-#SBATCH --array=1-72
+#SBATCH --array=1-60%5
 #SBATCH --tmp=200G
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-user=your.email@example.com

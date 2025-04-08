@@ -2,7 +2,7 @@
 #SBATCH --job-name=pathway_enrichment
 #SBATCH --output=pathway_enrichment_%j.out
 #SBATCH --error=pathway_enrichment_%j.err
-#SBATCH --time=1:00:00
+#SBATCH --time=0:30:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=1-1 # 60 is the number of GSE IDs, 5 is the number of tasks to run in parallel
