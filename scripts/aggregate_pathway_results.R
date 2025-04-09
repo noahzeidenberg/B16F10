@@ -119,6 +119,32 @@ load_pathway_results <- function(gse_dir) {
   
   tryCatch({
     results <- readRDS(results_file)
+    
+    # Validate the results structure
+    if (is.null(results) || length(results) == 0) {
+      message(sprintf("Warning: Empty results for %s. Skipping.\n", gse_id))
+      return(NULL)
+    }
+    
+    # Check if any contrasts have valid results
+    valid_contrasts <- 0
+    for (contrast_name in names(results)) {
+      contrast_results <- results[[contrast_name]]
+      if (!is.null(contrast_results) && 
+          (("kegg" %in% names(contrast_results) && !is.null(contrast_results$kegg) && nrow(contrast_results$kegg@result) > 0) ||
+           ("go_BP" %in% names(contrast_results) && !is.null(contrast_results$go_BP) && nrow(contrast_results$go_BP@result) > 0) ||
+           ("go_MF" %in% names(contrast_results) && !is.null(contrast_results$go_MF) && nrow(contrast_results$go_MF@result) > 0) ||
+           ("go_CC" %in% names(contrast_results) && !is.null(contrast_results$go_CC) && nrow(contrast_results$go_CC@result) > 0))) {
+        valid_contrasts <- valid_contrasts + 1
+      }
+    }
+    
+    if (valid_contrasts == 0) {
+      message(sprintf("Warning: No valid pathway results found for %s. Skipping.\n", gse_id))
+      return(NULL)
+    }
+    
+    cat(sprintf("Successfully loaded pathway results for %s with %d valid contrasts\n", gse_id, valid_contrasts))
     return(list(gse_id = gse_id, results = results))
   }, error = function(e) {
     message(sprintf("Error loading pathway results for %s: %s\n", gse_id, e$message))
@@ -440,7 +466,25 @@ aggregate_pathway_results <- function() {
   cat(sprintf("Found %d GSE directories with pathway enrichment results\n", length(gse_dirs_with_results)))
   
   # Load pathway results for each GSE
-  pathway_results_list <- lapply(gse_dirs_with_results, load_pathway_results)
+  pathway_results_list <- list()
+  skipped_gses <- character(0)
+  
+  for (gse_dir in gse_dirs_with_results) {
+    gse_id <- basename(gse_dir)
+    result <- load_pathway_results(gse_dir)
+    
+    if (is.null(result)) {
+      skipped_gses <- c(skipped_gses, gse_id)
+    } else {
+      pathway_results_list[[length(pathway_results_list) + 1]] <- result
+    }
+  }
+  
+  # Report skipped GSEs
+  if (length(skipped_gses) > 0) {
+    cat(sprintf("\nSkipped %d GSEs due to errors or invalid results:\n", length(skipped_gses)))
+    cat(paste(skipped_gses, collapse = ", "), "\n")
+  }
   
   # Filter out NULL results
   pathway_results_list <- pathway_results_list[!sapply(pathway_results_list, is.null)]
@@ -450,6 +494,8 @@ aggregate_pathway_results <- function() {
     return(FALSE)
   }
   
+  cat(sprintf("\nSuccessfully loaded pathway results for %d GSEs\n", length(pathway_results_list)))
+  
   # Aggregate pathway data
   pathway_data <- aggregate_pathway_data(pathway_results_list)
   
@@ -457,6 +503,19 @@ aggregate_pathway_results <- function() {
   data_file <- file.path(output_dir, "aggregated_pathway_data.rds")
   saveRDS(pathway_data, data_file)
   cat(sprintf("Saved aggregated pathway data to: %s\n", data_file))
+  
+  # Save list of included GSEs
+  included_gses <- sapply(pathway_results_list, function(x) x$gse_id)
+  included_file <- file.path(output_dir, "included_gses.txt")
+  write.table(included_gses, included_file, sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE)
+  cat(sprintf("Saved list of included GSEs to: %s\n", included_file))
+  
+  # Save list of skipped GSEs
+  if (length(skipped_gses) > 0) {
+    skipped_file <- file.path(output_dir, "skipped_gses.txt")
+    write.table(skipped_gses, skipped_file, sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE)
+    cat(sprintf("Saved list of skipped GSEs to: %s\n", skipped_file))
+  }
   
   # Find common pathways
   common_pathways <- find_common_pathways(pathway_data, min_occurrences = 2)
