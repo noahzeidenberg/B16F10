@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=pathway_enrichment
-#SBATCH --output=logs/pathway/pathway_enrichment_%j.out
-#SBATCH --error=logs/pathway/pathway_enrichment_%j.err
+#SBATCH --output=logs/pathway/pathway_enrichment_%A_%a.out
+#SBATCH --error=logs/pathway/pathway_enrichment_%A_%a.err
 #SBATCH --time=0:30:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4

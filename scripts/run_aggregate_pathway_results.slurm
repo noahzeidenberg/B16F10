@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=aggregate_pathways
-#SBATCH --output=logs/pathway/aggregate_pathways_%j.out
-#SBATCH --error=logs/pathway/aggregate_pathways_%j.err
+#SBATCH --output=logs/pathway/aggregate_pathways_%A_%a.out
+#SBATCH --error=logs/pathway/aggregate_pathways_%A_%a.err
 #SBATCH --time=1:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
