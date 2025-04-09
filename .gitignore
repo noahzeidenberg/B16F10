@@ -18,3 +18,5 @@ generate_design_matrices_lm.R
 generate_design_matrices_cmd.bat
 extract_sample_info.R
 local_differential_expression.R
+geo_download.R
+

@@ -63,6 +63,45 @@ dim(counts)
 print("First few rows and columns of counts:")
 head(counts[, 1:min(5, ncol(counts))])
 
+# Check if counts are negative (log-transformed)
+print("Summary of counts values:")
+summary(as.vector(counts))
+
+# Handle negative counts (log-transformed values)
+if (any(counts < 0)) {
+  print("Negative counts detected. Converting from log2(CPM/kb) to CPM/kb...")
+  
+  # First, check if we have raw counts available
+  if ("raw_counts" %in% names(normalized_data)) {
+    print("Using raw counts from normalized data...")
+    counts <- normalized_data$raw_counts
+    print("Raw counts summary:")
+    print(summary(as.vector(counts)))
+  } else {
+    # Convert from log2(CPM/kb) to CPM/kb
+    print("Converting from log2(CPM/kb) to CPM/kb...")
+    cpm_kb <- 2^counts
+    
+    # Then, multiply by gene length (in kb) to get CPM
+    if ("gene_lengths" %in% names(normalized_data)) {
+      gene_lengths_kb <- normalized_data$gene_lengths$length / 1000
+      
+      # Ensure gene lengths match the counts matrix
+      if (length(gene_lengths_kb) == nrow(counts)) {
+        # Convert from CPM/kb to CPM
+        counts <- sweep(cpm_kb, 1, gene_lengths_kb, "*")
+        print("Converted to CPM values. Summary:")
+        print(summary(as.vector(counts)))
+      } else {
+        stop(sprintf("Gene lengths (%d) do not match counts matrix dimensions (%d)", 
+                    length(gene_lengths_kb), nrow(counts)))
+      }
+    } else {
+      stop("Gene lengths not found in normalized data")
+    }
+  }
+}
+
 # ===== Load Design Matrix =====
 # Function to find design matrix
 find_design_matrix <- function(base_dir, gse_id) {
@@ -102,14 +141,18 @@ gsm_ids <- character(length(samples))
 
 for (i in 1:length(samples)) {
   sample_name <- samples[i]
+  
+  # Check if the sample name follows the new format (GSEID_GSMID_SRRID)
   if (grepl(paste0("^", gse_id, "_GSM[0-9]+_SRR"), sample_name)) {
+    # Extract GSM ID and SRR ID from the new format
     parts <- strsplit(sample_name, "_")[[1]]
-    gsm_ids[i] <- parts[2]
-    sra_ids[i] <- parts[3]
+    gsm_ids[i] <- parts[2]  # GSM ID is the second part
+    sra_ids[i] <- parts[3]  # SRR ID is the third part
   } else {
+    # Fall back to the old format (GSEID_SRRID)
     sra_ids[i] <- gsub("_Aligned.sortedByCoord.out.bam", "", sample_name)
     sra_ids[i] <- gsub(paste0(gse_id, "_"), "", sra_ids[i])
-    gsm_ids[i] <- NA
+    gsm_ids[i] <- NA  # We'll need to look up the GSM ID in the mapping file
   }
 }
 
@@ -121,20 +164,36 @@ print(gsm_ids)
 # Try to find mapping file for missing GSM IDs
 mapping_file <- file.path(base_dir, "sample_design", "sample_design", "sra_to_geo_mapping.txt")
 if (file.exists(mapping_file) && any(is.na(gsm_ids))) {
+  print("Found mapping file. Updating missing GSM IDs...")
   mapping <- read.table(mapping_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
   if (all(c("SRA_ID", "GEO_ID") %in% colnames(mapping))) {
     missing_gsm_indices <- which(is.na(gsm_ids))
     missing_sra_ids <- sra_ids[missing_gsm_indices]
     mapping <- mapping[mapping$SRA_ID %in% missing_sra_ids, ]
     
-    for (i in 1:nrow(mapping)) {
-      sra_id <- mapping$SRA_ID[i]
-      geo_id <- mapping$GEO_ID[i]
-      sra_index <- which(sra_ids == sra_id)
-      if (length(sra_index) > 0) {
-        gsm_ids[sra_index] <- geo_id
+    if (nrow(mapping) > 0) {
+      print(sprintf("Found %d mappings between SRA IDs and GEO IDs", nrow(mapping)))
+      
+      for (i in 1:nrow(mapping)) {
+        sra_id <- mapping$SRA_ID[i]
+        geo_id <- mapping$GEO_ID[i]
+        sra_index <- which(sra_ids == sra_id)
+        if (length(sra_index) > 0) {
+          gsm_ids[sra_index] <- geo_id
+        }
       }
+    } else {
+      print("No matching SRA IDs found in mapping file")
     }
+  } else {
+    print("Mapping file does not have required columns (SRA_ID, GEO_ID)")
+  }
+} else {
+  if (!file.exists(mapping_file)) {
+    print("Mapping file not found")
+  }
+  if (!any(is.na(gsm_ids))) {
+    print("No missing GSM IDs to update")
   }
 }
 
@@ -188,6 +247,12 @@ y <- DGEList(counts = counts)
 print("DGEList structure:")
 str(y)
 
+# Check if we're using CPM values
+if (all(y$counts >= 0) && max(y$counts) > 100) {
+  print("Using CPM values. Setting library sizes to 1e6...")
+  y$samples$lib.size <- rep(1e6, ncol(y))
+}
+
 # Filter low count genes
 keep <- filterByExpr(y)
 y <- y[keep, , keep.lib.sizes = FALSE]
@@ -232,6 +297,17 @@ if (length(control_groups) > 0 && length(treatment_groups) > 0) {
     print(sprintf("Creating contrast: %s", contrast_name))
     contrasts[[contrast_name]] <- makeContrasts(
       contrasts = paste0(treatment_group, " - ", control_group),
+      levels = design
+    )
+  }
+} else {
+  # If no control/treatment groups found, create contrasts for each group vs the first group
+  control_group <- groups[1]
+  for (i in 2:length(groups)) {
+    contrast_name <- paste0(groups[i], "_vs_", control_group)
+    print(sprintf("Creating contrast: %s", contrast_name))
+    contrasts[[contrast_name]] <- makeContrasts(
+      contrasts = paste0(groups[i], " - ", control_group),
       levels = design
     )
   }
