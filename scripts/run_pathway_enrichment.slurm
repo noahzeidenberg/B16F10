@@ -18,7 +18,7 @@ fi
 #GSE_ID=$(sed -n "${SLURM_ARRAY_TASK_ID}p" rna_seq_gse_ids.txt)
 GSE_ID="GSE287957"
 # Load required modules
-module load R
+module load r
 
 # load environment
 source .venv/bin/activate
