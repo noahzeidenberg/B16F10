@@ -5,6 +5,16 @@
 cat("=== Starting Pathway Enrichment Analysis ===\n")
 cat("Loading required packages...\n")
 
+# Get the scratch directory from environment variable
+get_base_dir <- function() {
+  scratch_dir <- Sys.getenv("SCRATCH")
+  if (scratch_dir == "") {
+    # Fallback to home directory if not on Graham
+    return(path.expand("~/scratch/B16F10"))
+  }
+  return(file.path(scratch_dir, "B16F10"))
+}
+
 # Function to safely load packages with offline fallback
 safe_load_package <- function(pkg, bioc_pkg = FALSE) {
   cat(sprintf("Loading package: %s\n", pkg))
@@ -90,9 +100,13 @@ if (!packages_loaded) {
 perform_pathway_enrichment <- function(gse_id) {
   cat(sprintf("Performing pathway enrichment analysis for %s...\n", gse_id))
   
-  # Set up directories
-  base_dir <- path.expand("~/scratch/B16F10")
+  # Set up directories using the new function
+  base_dir <- get_base_dir()
   gse_dir <- file.path(base_dir, gse_id)
+  
+  # Print directory information for debugging
+  cat(sprintf("Base directory: %s\n", base_dir))
+  cat(sprintf("GSE directory: %s\n", gse_dir))
   
   # Check if GSE directory exists
   if (!dir.exists(gse_dir)) {
@@ -359,7 +373,7 @@ main <- function(gse_id = NULL) {
     cat(sprintf("Performing pathway enrichment analysis for %s...\n", gse_id))
     
     # Check if the GSE directory exists
-    base_dir <- path.expand("~/scratch/B16F10")
+    base_dir <- get_base_dir()
     gse_dir <- file.path(base_dir, gse_id)
     
     if (!dir.exists(gse_dir)) {
