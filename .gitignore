@@ -1,3 +1,4 @@
+.gitignore
 # Environment variables
 .env
 
@@ -20,3 +21,6 @@ extract_sample_info.R
 local_differential_expression.R
 geo_download.R
 B16F10_RNASeq_NCBI_table.csv
+
+# Archived testing files
+archived_testing_files/
