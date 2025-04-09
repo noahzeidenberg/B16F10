@@ -1,0 +1,26 @@
+# Environment variables
+.env
+
+# R specific
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+.cursor/
+methods.md 
+prepare_array_job.R
+generate_design_matrices_lm.R
+generate_design_matrices_cmd.bat
+extract_sample_info.R
+local_differential_expression.R
+geo_download.R
+B16F10_RNASeq_NCBI_table.csv
+
+# Archived testing files
+archived_testing_files/
+
