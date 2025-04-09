@@ -80,7 +80,7 @@ if (!packages_loaded) {
   cat("install.packages(c('dplyr', 'tidyr', 'ggplot2', 'stringr', 'curl', 'pheatmap', 'RColorBrewer'))\n")
   cat("BiocManager::install(c('org.Mm.eg.db', 'clusterProfiler'))\n")
   
-  # Ask if the user wants to continue anyway
+  # Add exit option, was giving me trouble.
   cat("Do you want to continue anyway? (y/n): ")
   user_input <- readline()
   if (tolower(user_input) != "y") {
@@ -324,7 +324,7 @@ create_pathway_heatmap <- function(pathway_data, common_pathways, output_dir) {
   heatmap_file <- file.path(output_dir, "pathway_enrichment_heatmap.pdf")
   pdf(heatmap_file, width = 12, height = 10)
   
-  # Use pheatmap for better visualization
+  # Use pheatmap for better visualization. Plotly caps at ~100 rows I believe? Something around that number anyway.
   pheatmap::pheatmap(
     as.matrix(heatmap_data),
     scale = "row",
@@ -538,7 +538,7 @@ aggregate_pathway_results <- function() {
   return(TRUE)
 }
 
-# Run the main function if this script is being run directly
+# Run the main function
 if (sys.nframe() == 0) {
   aggregate_pathway_results()
 } 
