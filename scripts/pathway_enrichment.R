@@ -105,6 +105,8 @@ perform_pathway_enrichment <- function(gse_id) {
   gse_dir <- file.path(base_dir, gse_id)
   
   # Print directory information for debugging
+  cat("\n=== Directory Structure Debug Information ===\n")
+  cat(sprintf("Current working directory: %s\n", getwd()))
   cat(sprintf("Base directory: %s\n", base_dir))
   cat(sprintf("GSE directory: %s\n", gse_dir))
   
@@ -114,12 +116,32 @@ perform_pathway_enrichment <- function(gse_id) {
     return(FALSE)
   }
   
+  # List contents of GSE directory
+  cat("\nContents of GSE directory:\n")
+  list.files(gse_dir, full.names = TRUE) %>% cat(sep = "\n")
+  
   # Check if differential expression analysis has been performed
   de_dir <- file.path(gse_dir, "results", "differential_expression")
+  cat(sprintf("\nLooking for differential expression results in: %s\n", de_dir))
+  
   if (!dir.exists(de_dir)) {
     message(sprintf("Differential expression directory %s does not exist. Cannot proceed.\n", de_dir))
+    
+    # Check if results directory exists
+    results_dir <- file.path(gse_dir, "results")
+    if (dir.exists(results_dir)) {
+      cat("\nContents of results directory:\n")
+      list.files(results_dir, full.names = TRUE) %>% cat(sep = "\n")
+    } else {
+      cat("\nResults directory does not exist.\n")
+    }
+    
     return(FALSE)
   }
+  
+  # List contents of differential expression directory
+  cat("\nContents of differential expression directory:\n")
+  list.files(de_dir, full.names = TRUE) %>% cat(sep = "\n")
   
   # Create output directory for pathway enrichment results
   output_dir <- file.path(gse_dir, "results", "pathway_enrichment")
@@ -136,8 +158,19 @@ perform_pathway_enrichment <- function(gse_id) {
   normalization_dir <- file.path(gse_dir, "results", "normalization")
   normalized_file <- file.path(normalization_dir, "normalized_counts.rds")
   
+  cat(sprintf("\nLooking for normalized counts in: %s\n", normalized_file))
+  
   if (!file.exists(normalized_file)) {
     message(sprintf("Normalized counts not found at %s. Cannot proceed.\n", normalized_file))
+    
+    # Check if normalization directory exists
+    if (dir.exists(normalization_dir)) {
+      cat("\nContents of normalization directory:\n")
+      list.files(normalization_dir, full.names = TRUE) %>% cat(sep = "\n")
+    } else {
+      cat("\nNormalization directory does not exist.\n")
+    }
+    
     return(FALSE)
   }
   
@@ -161,6 +194,8 @@ perform_pathway_enrichment <- function(gse_id) {
   
   # Load differential expression results
   de_results_file <- file.path(de_dir, paste0(gse_id, "_de_results.rds"))
+  cat(sprintf("\nLooking for differential expression results file: %s\n", de_results_file))
+  
   if (!file.exists(de_results_file)) {
     message(sprintf("Differential expression results not found at %s. Cannot proceed.\n", de_results_file))
     return(FALSE)
