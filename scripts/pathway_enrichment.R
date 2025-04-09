@@ -52,7 +52,8 @@ required_packages <- list(
   "ggplot2" = TRUE,          # CRAN
   "dplyr" = TRUE,            # CRAN
   "stringr" = TRUE,          # CRAN
-  "curl" = TRUE              # CRAN - for internet connectivity check
+  "curl" = TRUE,             # CRAN - for internet connectivity check
+  "AnnotationDbi" = TRUE     # Bioconductor
 )
 
 # Load curl first to check internet connectivity
@@ -362,45 +363,63 @@ perform_pathway_enrichment <- function(gse_id) {
     # Perform KEGG pathway enrichment
     cat("Performing KEGG pathway enrichment...\n")
     tryCatch({
-      kegg_result <- enrichKEGG(
+      # Use explicit package references for select
+      kegg_result <- clusterProfiler::enrichKEGG(
         gene = gene_list$ENTREZID,
         organism = "mmu",
         pvalueCutoff = 0.05,
         pAdjustMethod = "BH"
       )
       
-      # Save KEGG results
-      kegg_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_kegg_enrichment.txt"))
-      write.table(kegg_result@result, kegg_file, sep = "\t", quote = FALSE)
-      cat(sprintf("Saved KEGG results to: %s\n", kegg_file))
-      
-      # Create KEGG dotplot
-      kegg_plot_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_kegg_dotplot.pdf"))
-      pdf(kegg_plot_file, width = 10, height = 8)
-      print(dotplot(kegg_result, showCategory = 20, title = paste("KEGG Pathway Enrichment:", contrast_name)))
-      dev.off()
-      cat(sprintf("Saved KEGG dotplot to: %s\n", kegg_plot_file))
-      
-      # Create KEGG barplot
-      kegg_bar_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_kegg_barplot.pdf"))
-      pdf(kegg_bar_file, width = 10, height = 8)
-      print(barplot(kegg_result, showCategory = 20, title = paste("KEGG Pathway Enrichment:", contrast_name)))
-      dev.off()
-      cat(sprintf("Saved KEGG barplot to: %s\n", kegg_bar_file))
-      
-      # Create KEGG emapplot (enrichment map)
-      if (nrow(kegg_result@result) > 1) {
-        kegg_emap_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_kegg_emapplot.pdf"))
-        pdf(kegg_emap_file, width = 10, height = 8)
-        print(emapplot(kegg_result, showCategory = 20))
-        dev.off()
-        cat(sprintf("Saved KEGG emapplot to: %s\n", kegg_emap_file))
+      # Check if we got any results
+      if (is.null(kegg_result)) {
+        cat("Warning: KEGG enrichment returned NULL result\n")
+      } else if (nrow(kegg_result@result) == 0) {
+        cat("Warning: No enriched KEGG pathways found\n")
+      } else {
+        cat(sprintf("Found %d enriched KEGG pathways\n", nrow(kegg_result@result)))
+        
+        # Print the first few results for debugging
+        cat("\nTop KEGG pathways:\n")
+        print(head(kegg_result@result))
+        
+        # Save KEGG results
+        kegg_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_kegg_enrichment.txt"))
+        write.table(kegg_result@result, kegg_file, sep = "\t", quote = FALSE)
+        cat(sprintf("Saved KEGG results to: %s\n", kegg_file))
+        
+        # Create KEGG dotplot
+        if (nrow(kegg_result@result) > 0) {
+          kegg_plot_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_kegg_dotplot.pdf"))
+          pdf(kegg_plot_file, width = 10, height = 8)
+          print(enrichplot::dotplot(kegg_result, showCategory = 20, title = paste("KEGG Pathway Enrichment:", contrast_name)))
+          dev.off()
+          cat(sprintf("Saved KEGG dotplot to: %s\n", kegg_plot_file))
+          
+          # Create KEGG barplot
+          kegg_bar_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_kegg_barplot.pdf"))
+          pdf(kegg_bar_file, width = 10, height = 8)
+          print(enrichplot::barplot(kegg_result, showCategory = 20, title = paste("KEGG Pathway Enrichment:", contrast_name)))
+          dev.off()
+          cat(sprintf("Saved KEGG barplot to: %s\n", kegg_bar_file))
+          
+          # Create KEGG emapplot (enrichment map)
+          if (nrow(kegg_result@result) > 1) {
+            kegg_emap_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_kegg_emapplot.pdf"))
+            pdf(kegg_emap_file, width = 10, height = 8)
+            print(enrichplot::emapplot(kegg_result, showCategory = 20))
+            dev.off()
+            cat(sprintf("Saved KEGG emapplot to: %s\n", kegg_emap_file))
+          }
+        }
+        
+        # Add to results list
+        pathway_results[[contrast_name]]$kegg <- kegg_result
       }
-      
-      # Add to results list
-      pathway_results[[contrast_name]]$kegg <- kegg_result
     }, error = function(e) {
       cat(sprintf("Error performing KEGG pathway enrichment: %s\n", e$message))
+      cat("Stack trace:\n")
+      print(sys.calls())
     })
     
     # Perform GO enrichment
@@ -411,7 +430,8 @@ perform_pathway_enrichment <- function(gse_id) {
       cat(sprintf("Performing GO enrichment for %s ontology...\n", ont))
       
       tryCatch({
-        go_result <- enrichGO(
+        # Use explicit package references for select
+        go_result <- clusterProfiler::enrichGO(
           gene = gene_list$ENTREZID,
           OrgDb = "org.Mm.eg.db",
           ont = ont,
@@ -419,11 +439,22 @@ perform_pathway_enrichment <- function(gse_id) {
           pAdjustMethod = "BH"
         )
         
-        # Skip if no enriched terms
-        if (nrow(go_result@result) == 0) {
-          cat(sprintf("No enriched GO terms found for %s ontology. Skipping...\n", ont))
+        # Check if we got any results
+        if (is.null(go_result)) {
+          cat(sprintf("Warning: GO %s enrichment returned NULL result\n", ont))
           next
         }
+        
+        if (nrow(go_result@result) == 0) {
+          cat(sprintf("Warning: No enriched GO terms found for %s ontology\n", ont))
+          next
+        }
+        
+        cat(sprintf("Found %d enriched GO terms for %s ontology\n", nrow(go_result@result), ont))
+        
+        # Print the first few results for debugging
+        cat(sprintf("\nTop GO %s terms:\n", ont))
+        print(head(go_result@result))
         
         # Save GO results
         go_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_go_", ont, "_enrichment.txt"))
@@ -433,14 +464,14 @@ perform_pathway_enrichment <- function(gse_id) {
         # Create GO dotplot
         go_plot_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_go_", ont, "_dotplot.pdf"))
         pdf(go_plot_file, width = 10, height = 8)
-        print(dotplot(go_result, showCategory = 20, title = paste("GO", ont, "Enrichment:", contrast_name)))
+        print(enrichplot::dotplot(go_result, showCategory = 20, title = paste("GO", ont, "Enrichment:", contrast_name)))
         dev.off()
         cat(sprintf("Saved GO %s dotplot to: %s\n", ont, go_plot_file))
         
         # Create GO barplot
         go_bar_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_go_", ont, "_barplot.pdf"))
         pdf(go_bar_file, width = 10, height = 8)
-        print(barplot(go_result, showCategory = 20, title = paste("GO", ont, "Enrichment:", contrast_name)))
+        print(enrichplot::barplot(go_result, showCategory = 20, title = paste("GO", ont, "Enrichment:", contrast_name)))
         dev.off()
         cat(sprintf("Saved GO %s barplot to: %s\n", ont, go_bar_file))
         
@@ -448,22 +479,57 @@ perform_pathway_enrichment <- function(gse_id) {
         if (nrow(go_result@result) > 1) {
           go_emap_file <- file.path(output_dir, paste0(gse_id, "_", contrast_name, "_go_", ont, "_emapplot.pdf"))
           pdf(go_emap_file, width = 10, height = 8)
-          print(emapplot(go_result, showCategory = 20))
+          print(enrichplot::emapplot(go_result, showCategory = 20))
           dev.off()
           cat(sprintf("Saved GO %s emapplot to: %s\n", ont, go_emap_file))
         }
         
         # Add to results list
         pathway_results[[contrast_name]][[paste0("go_", ont)]] <- go_result
+        
       }, error = function(e) {
         cat(sprintf("Error performing GO %s enrichment: %s\n", ont, e$message))
+        cat("Stack trace:\n")
+        print(sys.calls())
       })
+    }
+  }
+  
+  # Check if we got any results before saving
+  if (length(pathway_results) == 0) {
+    cat("Warning: No pathway enrichment results were generated\n")
+    return(FALSE)
+  }
+  
+  # Check the contents of the results
+  cat("\nSummary of pathway enrichment results:\n")
+  for (contrast in names(pathway_results)) {
+    cat(sprintf("\nContrast: %s\n", contrast))
+    if ("kegg" %in% names(pathway_results[[contrast]])) {
+      kegg_res <- pathway_results[[contrast]]$kegg
+      if (!is.null(kegg_res) && nrow(kegg_res@result) > 0) {
+        cat(sprintf("  KEGG pathways: %d\n", nrow(kegg_res@result)))
+      } else {
+        cat("  No KEGG pathways found\n")
+      }
+    }
+    
+    for (ont in c("BP", "MF", "CC")) {
+      go_key <- paste0("go_", ont)
+      if (go_key %in% names(pathway_results[[contrast]])) {
+        go_res <- pathway_results[[contrast]][[go_key]]
+        if (!is.null(go_res) && nrow(go_res@result) > 0) {
+          cat(sprintf("  GO %s terms: %d\n", ont, nrow(go_res@result)))
+        } else {
+          cat(sprintf("  No GO %s terms found\n", ont))
+        }
+      }
     }
   }
   
   # Save all results
   saveRDS(pathway_results, results_file)
-  cat(sprintf("Saved all pathway enrichment results to: %s\n", results_file))
+  cat(sprintf("\nSaved all pathway enrichment results to: %s\n", results_file))
   
   return(TRUE)
 }
