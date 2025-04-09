@@ -178,6 +178,10 @@ perform_pathway_enrichment <- function(gse_id) {
     
     cat(sprintf("Found %d differentially expressed genes for %s\n", length(de_genes), contrast_name))
     
+    # Print examples of differentially expressed genes
+    cat("Examples of differentially expressed genes:\n")
+    print(head(de_genes, n = 10))
+    
     # Skip if no differentially expressed genes
     if (length(de_genes) == 0) {
       cat(sprintf("No differentially expressed genes found for %s. Skipping...\n", contrast_name))
@@ -190,48 +194,170 @@ perform_pathway_enrichment <- function(gse_id) {
     # Try to identify the gene ID format
     gene_id_format <- "ENSEMBL"  # Default to ENSEMBL
     
+    # Print some statistics about the gene IDs
+    cat("\nAnalyzing gene ID format:\n")
+    ensembl_pattern <- sum(grepl("^ENS", de_genes))
+    symbol_pattern <- sum(grepl("^[A-Za-z]", de_genes))
+    cat(sprintf("Number of genes matching ENSEMBL pattern (^ENS): %d\n", ensembl_pattern))
+    cat(sprintf("Number of genes matching SYMBOL pattern (^[A-Za-z]): %d\n", symbol_pattern))
+    cat(sprintf("Total number of genes: %d\n", length(de_genes)))
+    
+    # Print some example gene IDs
+    cat("\nFirst few gene IDs:\n")
+    print(head(de_genes))
+    cat("\nLast few gene IDs:\n")
+    print(tail(de_genes))
+    
     # Check if the gene IDs are in ENSEMBL format
     if (!all(grepl("^ENS", de_genes))) {
       # Check if the gene IDs are in SYMBOL format
       if (all(grepl("^[A-Za-z]", de_genes))) {
         gene_id_format <- "SYMBOL"
-        cat("Gene IDs appear to be in SYMBOL format.\n")
+        cat("\nGene IDs appear to be in SYMBOL format.\n")
       } else {
-        cat("Gene IDs do not appear to be in ENSEMBL or SYMBOL format. Using ENSEMBL as default.\n")
+        cat("\nWarning: Gene IDs do not appear to be in ENSEMBL or SYMBOL format.\n")
+        cat("Attempting to identify format by checking a sample of IDs:\n")
+        
+        # Take a sample of gene IDs to analyze
+        sample_size <- min(10, length(de_genes))
+        sample_ids <- head(de_genes, n = sample_size)
+        cat("Sample IDs:\n")
+        print(sample_ids)
+        
+        # Try to detect any common patterns
+        patterns <- list(
+          ensembl = "^ENS[A-Z]*[0-9]+",
+          symbol = "^[A-Za-z][A-Za-z0-9]*$",
+          entrez = "^[0-9]+$"
+        )
+        
+        pattern_matches <- sapply(patterns, function(p) sum(grepl(p, sample_ids)))
+        cat("\nPattern matches in sample:\n")
+        print(pattern_matches)
+        
+        # Use the most common pattern
+        best_pattern <- names(which.max(pattern_matches))
+        cat(sprintf("\nMost common pattern appears to be: %s\n", best_pattern))
+        
+        if (best_pattern == "symbol") {
+          gene_id_format <- "SYMBOL"
+        } else if (best_pattern == "entrez") {
+          gene_id_format <- "ENTREZID"
+        } else {
+          gene_id_format <- "ENSEMBL"
+        }
+        
+        cat(sprintf("Using %s as the gene ID format.\n", gene_id_format))
       }
     } else {
-      cat("Gene IDs appear to be in ENSEMBL format.\n")
+      cat("\nGene IDs appear to be in ENSEMBL format.\n")
     }
     
-    # Convert gene IDs
+    # Function to print gene ID conversion results
+    print_conversion_results <- function(result, original_ids) {
+      cat("\nGene ID conversion results:\n")
+      cat(sprintf("Original number of genes: %d\n", length(original_ids)))
+      cat(sprintf("Number of genes successfully converted: %d\n", nrow(result)))
+      cat(sprintf("Conversion rate: %.2f%%\n", nrow(result) / length(original_ids) * 100))
+      
+      # Print examples of successful conversions
+      cat("\nExamples of successful conversions:\n")
+      print(head(result))
+      
+      # Find and print examples of failed conversions
+      failed_ids <- setdiff(original_ids, result[[1]])
+      if (length(failed_ids) > 0) {
+        cat(sprintf("\nExamples of failed conversions (%d total):\n", length(failed_ids)))
+        print(head(failed_ids, n = 10))
+      }
+    }
+    
+    # Convert gene IDs with detailed error handling
+    gene_list <- NULL
+    conversion_error <- NULL
+    
+    cat(sprintf("\nAttempting to convert gene IDs from %s to ENTREZID...\n", gene_id_format))
+    
     tryCatch({
-      gene_list <- bitr(de_genes, fromType = gene_id_format, toType = "ENTREZID", OrgDb = "org.Mm.eg.db")
-      cat(sprintf("Successfully converted %d genes to ENTREZID\n", nrow(gene_list)))
+      gene_list <- bitr(de_genes, 
+                       fromType = gene_id_format, 
+                       toType = "ENTREZID", 
+                       OrgDb = "org.Mm.eg.db")
+      
+      print_conversion_results(gene_list, de_genes)
+      
+    }, warning = function(w) {
+      cat(sprintf("\nWarning during gene ID conversion: %s\n", w$message))
     }, error = function(e) {
-      cat(sprintf("Error converting gene IDs: %s\n", e$message))
+      conversion_error <- e$message
+      cat(sprintf("\nError during gene ID conversion: %s\n", e$message))
       cat("Trying alternative approach...\n")
       
       # Try with a different gene ID format
-      if (gene_id_format == "ENSEMBL") {
-        gene_id_format <- "SYMBOL"
-      } else {
-        gene_id_format <- "ENSEMBL"
-      }
+      alt_format <- if (gene_id_format == "ENSEMBL") "SYMBOL" else "ENSEMBL"
+      cat(sprintf("Attempting conversion with %s format...\n", alt_format))
       
       tryCatch({
-        gene_list <- bitr(de_genes, fromType = gene_id_format, toType = "ENTREZID", OrgDb = "org.Mm.eg.db")
-        cat(sprintf("Successfully converted %d genes to ENTREZID using %s format\n", nrow(gene_list), gene_id_format))
+        gene_list <<- bitr(de_genes, 
+                          fromType = alt_format, 
+                          toType = "ENTREZID", 
+                          OrgDb = "org.Mm.eg.db")
+        
+        print_conversion_results(gene_list, de_genes)
+        
+      }, warning = function(w2) {
+        cat(sprintf("\nWarning during alternative gene ID conversion: %s\n", w2$message))
       }, error = function(e2) {
-        cat(sprintf("Error converting gene IDs with alternative approach: %s\n", e2$message))
-        return(NULL)
+        cat(sprintf("\nError during alternative gene ID conversion: %s\n", e2$message))
+        
+        # Try one more time with SYMBOL format and more lenient matching
+        cat("\nTrying one more time with more lenient matching...\n")
+        
+        # Clean up gene IDs - remove version numbers and other common modifications
+        clean_ids <- gsub("\\..*$", "", de_genes)  # Remove version numbers
+        clean_ids <- gsub("_.*$", "", clean_ids)   # Remove suffixes
+        
+        tryCatch({
+          gene_list <<- bitr(clean_ids, 
+                            fromType = "SYMBOL", 
+                            toType = "ENTREZID", 
+                            OrgDb = "org.Mm.eg.db")
+          
+          print_conversion_results(gene_list, clean_ids)
+          
+        }, warning = function(w3) {
+          cat(sprintf("\nWarning during final gene ID conversion attempt: %s\n", w3$message))
+        }, error = function(e3) {
+          cat(sprintf("\nError during final gene ID conversion attempt: %s\n", e3$message))
+          return(NULL)
+        })
       })
     })
     
-    # Skip if gene ID conversion failed
-    if (is.null(gene_list) || nrow(gene_list) == 0) {
-      cat("Gene ID conversion failed. Skipping this contrast.\n")
+    # Verify gene_list exists and has the correct structure
+    if (is.null(gene_list)) {
+      cat("\nFatal error: gene_list is NULL after all conversion attempts\n")
       next
     }
+    
+    if (!is.data.frame(gene_list)) {
+      cat("\nFatal error: gene_list is not a data frame\n")
+      cat("gene_list class:", class(gene_list), "\n")
+      next
+    }
+    
+    if (!"ENTREZID" %in% colnames(gene_list)) {
+      cat("\nFatal error: ENTREZID column not found in gene_list\n")
+      cat("Available columns:", paste(colnames(gene_list), collapse = ", "), "\n")
+      next
+    }
+    
+    if (nrow(gene_list) == 0) {
+      cat("\nFatal error: No genes were successfully converted to ENTREZID\n")
+      next
+    }
+    
+    cat(sprintf("\nProceeding with pathway analysis using %d successfully converted genes\n", nrow(gene_list)))
     
     # Perform KEGG pathway enrichment
     cat("Performing KEGG pathway enrichment...\n")
